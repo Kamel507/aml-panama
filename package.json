@@ -4,7 +4,7 @@
   "description": "Sistema de Cumplimiento AML/FT - Ley 23 de 2015 de Panamá",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --max-old-space-size=400 server.js",
     "dev": "npx nodemon server.js"
   },
   "dependencies": {
