@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sistema AML/FT — Ley 23 de 2015</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── Barra de estado de listas ── -->
+  <div id="barra-estado" class="barra-estado">
+    <span>Cargando listas de sanciones…</span>
+  </div>
+
+  <!-- ── Encabezado ── -->
+  <header class="encabezado">
+    <div class="encabezado-inner">
+      <div class="logo-texto">
+        <span class="escudo">⚖</span>
+        <div>
+          <h1>Sistema AML/FT</h1>
+          <p>Prevención de Lavado de Dinero y Financiamiento del Terrorismo</p>
+          <p class="ley">Ley 23 de 2015 · República de Panamá</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Navegación por pestañas ── -->
+  <nav class="tabs">
+    <button class="tab activo" data-tab="consulta">🔍 Nueva Consulta</button>
+    <button class="tab" data-tab="clientes">👤 Clientes</button>
+    <button class="tab" data-tab="historial">📋 Historial</button>
+    <button class="tab" data-tab="estado">🛡 Listas y Cumplimiento</button>
+  </nav>
+
+  <main class="contenido">
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: NUEVA CONSULTA
+    ══════════════════════════════════════════════ -->
+    <section id="tab-consulta" class="panel activo">
+
+      <div class="aviso-legal">
+        <strong>Aviso Legal:</strong> Este sistema consulta las listas oficiales de la ONU, OFAC y la
+        Unión Europea, además de los registros internos de PEP y países GAFI de alto riesgo.
+        Los resultados no constituyen asesoría legal. Toda coincidencia debe ser verificada por el
+        Oficial de Cumplimiento antes de tomar decisiones.
+      </div>
+
+      <div id="banner-cliente-vinculado" class="mensaje-info oculto"></div>
+
+      <div class="tarjeta formulario-tarjeta">
+        <h2>Búsqueda en Listas de Sanciones, PEP y GAFI</h2>
+        <p class="subtitulo">Ingrese el nombre, cédula/documento y, de ser posible, el país de nacionalidad del cliente.</p>
+
+        <form id="form-consulta">
+          <input type="hidden" id="cliente-id" value="" />
+          <div class="campos-fila">
+            <div class="campo">
+              <label for="nombre">Nombre completo</label>
+              <input
+                type="text"
+                id="nombre"
+                name="nombre"
+                placeholder="Ej: Juan Carlos López Pérez"
+                autocomplete="off"
+                maxlength="200"
+              />
+            </div>
+            <div class="campo">
+              <label for="cedula">Cédula / Pasaporte / ID</label>
+              <input
+                type="text"
+                id="cedula"
+                name="cedula"
+                placeholder="Ej: 8-123-4567"
+                autocomplete="off"
+                maxlength="50"
+              />
+            </div>
+          </div>
+
+          <div class="campos-fila">
+            <div class="campo">
+              <label for="pais">País / Nacionalidad <span class="campo-nota">(para evaluación GAFI — Art. 41)</span></label>
+              <input
+                type="text"
+                id="pais"
+                name="pais"
+                placeholder="Ej: Venezuela"
+                autocomplete="off"
+                maxlength="80"
+              />
+            </div>
+            <div class="campo">
+              <label for="usuario">Realizado por</label>
+              <input
+                type="text"
+                id="usuario"
+                name="usuario"
+                placeholder="Nombre del Oficial de Cumplimiento / usuario"
+                autocomplete="off"
+                maxlength="120"
+              />
+            </div>
+          </div>
+
+          <div id="error-form" class="mensaje-error oculto"></div>
+
+          <div class="acciones-formulario">
+            <button type="submit" id="btn-buscar" class="btn-primario">
+              <span class="btn-icon">🔍</span>
+              <span class="btn-texto">Consultar Listas de Sanciones</span>
+            </button>
+
+            <input type="file" id="file-documento" accept="image/*,.pdf" style="display:none" />
+            <button type="button" id="btn-subir-documento" class="btn-documento">
+              <span class="btn-icon">📷</span>
+              <span class="btn-texto">Subir documento de identidad</span>
+            </button>
+          </div>
+
+          <div id="doc-info" class="doc-info oculto"></div>
+        </form>
+      </div>
+
+      <!-- Indicador de carga -->
+      <div id="cargando" class="cargando oculto">
+        <div class="spinner"></div>
+        <p>Consultando listas de sanciones internacionales…</p>
+      </div>
+
+      <!-- Resultado de la búsqueda -->
+      <div id="resultado-contenedor" class="oculto">
+
+        <div id="veredicto-banner" class="veredicto-banner">
+          <span id="veredicto-icono"></span>
+          <span id="veredicto-texto"></span>
+        </div>
+
+        <div class="meta-consulta tarjeta">
+          <div class="meta-grid">
+            <div><strong>N° Consulta:</strong> <span id="meta-id">—</span></div>
+            <div><strong>Fecha:</strong> <span id="meta-fecha">—</span></div>
+            <div><strong>Hora:</strong> <span id="meta-hora">—</span></div>
+            <div><strong>Nombre:</strong> <span id="meta-nombre">—</span></div>
+            <div><strong>Cédula/ID:</strong> <span id="meta-cedula">—</span></div>
+            <div><strong>País:</strong> <span id="meta-pais">—</span></div>
+          </div>
+          <a id="btn-pdf" href="#" target="_blank" class="btn-pdf">
+            📄 Descargar Reporte PDF
+          </a>
+        </div>
+
+        <!-- Alerta GAFI -->
+        <div id="alerta-gafi" class="tarjeta alerta-gafi oculto"></div>
+
+        <!-- Resultados ONU -->
+        <div class="tarjeta resultado-lista" id="card-onu">
+          <div class="lista-encabezado">
+            <div class="lista-logo onu">ONU</div>
+            <div>
+              <h3>Lista Consolidada de Sanciones — Consejo de Seguridad ONU</h3>
+              <p>Art. 41, Ley 23 de 2015 · Al-Qaida, Talibán, Corea del Norte, Irán y otras</p>
+            </div>
+            <div id="badge-onu" class="badge"></div>
+          </div>
+          <div id="resultados-onu"></div>
+        </div>
+
+        <!-- Resultados OFAC -->
+        <div class="tarjeta resultado-lista" id="card-ofac">
+          <div class="lista-encabezado">
+            <div class="lista-logo ofac">OFAC</div>
+            <div>
+              <h3>Lista SDN — OFAC / Departamento del Tesoro EE.UU.</h3>
+              <p>Art. 41, Ley 23 de 2015 · Specially Designated Nationals and Blocked Persons List</p>
+            </div>
+            <div id="badge-ofac" class="badge"></div>
+          </div>
+          <div id="resultados-ofac"></div>
+        </div>
+
+        <!-- Resultados UE -->
+        <div class="tarjeta resultado-lista" id="card-ue">
+          <div class="lista-encabezado">
+            <div class="lista-logo ue">UE</div>
+            <div>
+              <h3>Lista de Sanciones Financieras — Unión Europea</h3>
+              <p>Art. 41, Ley 23 de 2015 · EU Financial Sanctions Files (FSF)</p>
+            </div>
+            <div id="badge-ue" class="badge"></div>
+          </div>
+          <div id="resultados-ue"></div>
+        </div>
+
+        <!-- Resultados PEP -->
+        <div class="tarjeta resultado-lista" id="card-pep">
+          <div class="lista-encabezado">
+            <div class="lista-logo pep">PEP</div>
+            <div>
+              <h3>Personas Expuestas Políticamente — Panamá</h3>
+              <p>Art. 34, Ley 23 de 2015 · Funcionarios, familiares y colaboradores cercanos</p>
+            </div>
+            <div id="badge-pep" class="badge"></div>
+          </div>
+          <div id="resultados-pep"></div>
+        </div>
+
+        <!-- Errores (si los hay) -->
+        <div id="errores-consulta" class="oculto mensaje-error"></div>
+
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: CLIENTES
+    ══════════════════════════════════════════════ -->
+    <section id="tab-clientes" class="panel oculto">
+
+      <!-- Vista: lista de clientes -->
+      <div id="clientes-vista-lista">
+        <div class="tarjeta">
+          <div class="historial-header">
+            <h2>Expedientes de Clientes</h2>
+            <button id="btn-nuevo-cliente" class="btn-primario btn-chico">+ Nuevo Cliente</button>
+          </div>
+          <p class="subtitulo">Cree fichas de clientes, suba sus documentos y consulte su historial AML.</p>
+
+          <div class="campo campo-buscar">
+            <input type="text" id="buscar-cliente" placeholder="Buscar por nombre o cédula…" autocomplete="off" />
+          </div>
+
+          <div id="tabla-clientes-contenedor">
+            <table class="tabla-historial" id="tabla-clientes">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Cédula/RUC</th>
+                  <th>Tipo</th>
+                  <th>Nacionalidad</th>
+                  <th>Creado</th>
+                  <th>Ficha</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-clientes">
+                <tr><td colspan="6" class="cargando-msg">Cargando clientes…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Formulario nuevo cliente -->
+        <div id="form-nuevo-cliente-tarjeta" class="tarjeta oculto">
+          <h2>Nuevo Cliente</h2>
+          <form id="form-nuevo-cliente">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="nc-nombre">Nombre completo / Razón social</label>
+                <input type="text" id="nc-nombre" required maxlength="200" />
+              </div>
+              <div class="campo">
+                <label for="nc-cedula">Cédula / RUC</label>
+                <input type="text" id="nc-cedula" maxlength="50" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="nc-tipo">Tipo de cliente</label>
+                <select id="nc-tipo">
+                  <option value="natural">Persona natural</option>
+                  <option value="juridica">Persona jurídica</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label for="nc-nacionalidad">Nacionalidad / País</label>
+                <input type="text" id="nc-nacionalidad" maxlength="80" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="nc-fecha-nacimiento">Fecha de nacimiento / constitución</label>
+                <input type="text" id="nc-fecha-nacimiento" placeholder="DD/MM/AAAA" maxlength="20" />
+              </div>
+              <div class="campo">
+                <label for="nc-notas">Notas</label>
+                <input type="text" id="nc-notas" maxlength="300" />
+              </div>
+            </div>
+            <div id="error-nuevo-cliente" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Crear Ficha de Cliente</button>
+              <button type="button" id="btn-cancelar-nuevo-cliente" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Vista: ficha de cliente -->
+      <div id="clientes-vista-ficha" class="oculto">
+        <button id="btn-volver-clientes" class="btn-secundario btn-volver">← Volver a la lista de clientes</button>
+
+        <div class="tarjeta ficha-cliente-tarjeta">
+          <div class="historial-header">
+            <h2 id="ficha-nombre">—</h2>
+            <button id="btn-buscar-aml-cliente" class="btn-primario btn-chico">🔍 Buscar AML de este cliente</button>
+          </div>
+
+          <div class="meta-grid ficha-meta">
+            <div><strong>Cédula/RUC:</strong> <span id="ficha-cedula">—</span></div>
+            <div><strong>Tipo:</strong> <span id="ficha-tipo">—</span></div>
+            <div><strong>Nacionalidad:</strong> <span id="ficha-nacionalidad">—</span></div>
+            <div><strong>Fecha nacimiento/constitución:</strong> <span id="ficha-fecha-nacimiento">—</span></div>
+            <div><strong>Creado:</strong> <span id="ficha-creado">—</span></div>
+          </div>
+
+          <button id="btn-editar-cliente" class="btn-secundario btn-chico">✎ Editar datos</button>
+
+          <form id="form-editar-cliente" class="oculto">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ec-nombre">Nombre completo / Razón social</label>
+                <input type="text" id="ec-nombre" required maxlength="200" />
+              </div>
+              <div class="campo">
+                <label for="ec-cedula">Cédula / RUC</label>
+                <input type="text" id="ec-cedula" maxlength="50" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ec-tipo">Tipo de cliente</label>
+                <select id="ec-tipo">
+                  <option value="natural">Persona natural</option>
+                  <option value="juridica">Persona jurídica</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label for="ec-nacionalidad">Nacionalidad / País</label>
+                <input type="text" id="ec-nacionalidad" maxlength="80" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ec-fecha-nacimiento">Fecha de nacimiento / constitución</label>
+                <input type="text" id="ec-fecha-nacimiento" maxlength="20" />
+              </div>
+              <div class="campo">
+                <label for="ec-notas">Notas</label>
+                <input type="text" id="ec-notas" maxlength="300" />
+              </div>
+            </div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Guardar Cambios</button>
+              <button type="button" id="btn-cancelar-editar-cliente" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Documentos del cliente -->
+        <div class="tarjeta">
+          <h2>Documentos del Expediente</h2>
+          <p class="subtitulo">Pasaporte, cédula, pacto social, estados financieros, RUC u otros (PDF o imagen).</p>
+
+          <form id="form-subir-documento" class="form-doc-cliente">
+            <select id="doc-tipo">
+              <option value="pasaporte">Pasaporte</option>
+              <option value="cedula">Cédula</option>
+              <option value="pacto_social">Pacto Social</option>
+              <option value="estados_financieros">Estados Financieros</option>
+              <option value="ruc">RUC</option>
+              <option value="otro">Otro</option>
+            </select>
+            <input type="file" id="doc-archivo" accept="image/*,.pdf" required />
+            <button type="submit" class="btn-secundario">⬆ Subir Documento</button>
+          </form>
+          <div id="error-subir-doc" class="mensaje-error oculto"></div>
+
+          <div id="lista-documentos-cliente" class="lista-documentos">
+            <p class="cargando-msg">Cargando documentos…</p>
+          </div>
+        </div>
+
+        <!-- Historial AML del cliente -->
+        <div class="tarjeta">
+          <h2>Historial de Búsquedas AML de este Cliente</h2>
+          <div id="tabla-historial-cliente-contenedor">
+            <table class="tabla-historial">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Fecha</th>
+                  <th>Hora</th>
+                  <th>Usuario</th>
+                  <th>Resultado</th>
+                  <th>PDF</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-historial-cliente">
+                <tr><td colspan="6" class="cargando-msg">Cargando historial…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: HISTORIAL
+    ══════════════════════════════════════════════ -->
+    <section id="tab-historial" class="panel oculto">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Historial de Consultas</h2>
+          <button id="btn-actualizar-historial" class="btn-secundario">↻ Actualizar</button>
+        </div>
+        <p class="subtitulo">Cada búsqueda queda registrada con fecha, hora, usuario, resultado y listas consultadas.</p>
+
+        <div class="filtros-historial">
+          <div class="campo">
+            <label for="filtro-fecha-desde">Desde</label>
+            <input type="date" id="filtro-fecha-desde" />
+          </div>
+          <div class="campo">
+            <label for="filtro-fecha-hasta">Hasta</label>
+            <input type="date" id="filtro-fecha-hasta" />
+          </div>
+          <div class="campo">
+            <label for="filtro-resultado">Resultado</label>
+            <select id="filtro-resultado">
+              <option value="">Todos</option>
+              <option value="alerta">Solo con alerta</option>
+              <option value="limpio">Solo sin coincidencias</option>
+            </select>
+          </div>
+          <button id="btn-filtrar-historial" class="btn-secundario">Filtrar</button>
+          <button id="btn-limpiar-filtros" class="btn-secundario">Limpiar</button>
+        </div>
+
+        <div id="tabla-historial-contenedor" class="tabla-scroll">
+          <table class="tabla-historial" id="tabla-historial">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Nombre</th>
+                <th>Cédula/ID</th>
+                <th>País</th>
+                <th>Usuario</th>
+                <th>Cliente</th>
+                <th>ONU</th>
+                <th>OFAC</th>
+                <th>UE</th>
+                <th>PEP</th>
+                <th>GAFI</th>
+                <th>Resultado</th>
+                <th>PDF</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-historial">
+              <tr><td colspan="15" class="cargando-msg">Cargando historial…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: LISTAS Y CUMPLIMIENTO
+    ══════════════════════════════════════════════ -->
+    <section id="tab-estado" class="panel oculto">
+      <div class="tarjeta">
+        <h2>Estado de las Listas Internacionales</h2>
+        <p class="subtitulo">ONU y OFAC se descargan automáticamente. La lista de la UE puede requerir carga manual según la red.</p>
+
+        <div class="estado-listas-grid">
+          <!-- ONU -->
+          <div class="estado-card" id="estado-onu">
+            <div class="estado-logo onu-grande">🌐</div>
+            <h3>Lista ONU Consolidada (Art. 41)</h3>
+            <p class="estado-url">scsanctions.un.org</p>
+            <div id="onu-estado-info">
+              <div class="estado-item"><span>Estado:</span> <strong id="onu-cargada">Verificando…</strong></div>
+              <div class="estado-item"><span>Entradas:</span> <strong id="onu-entradas">—</strong></div>
+              <div class="estado-item"><span>Actualización:</span> <strong id="onu-fecha">—</strong></div>
+              <div class="estado-item"><span>Caché en disco:</span> <strong id="onu-cache">—</strong></div>
+            </div>
+          </div>
+
+          <!-- OFAC -->
+          <div class="estado-card" id="estado-ofac">
+            <div class="estado-logo ofac-grande">🦅</div>
+            <h3>Lista OFAC SDN (Art. 41)</h3>
+            <p class="estado-url">treasury.gov/ofac</p>
+            <div id="ofac-estado-info">
+              <div class="estado-item"><span>Estado:</span> <strong id="ofac-cargada">Verificando…</strong></div>
+              <div class="estado-item"><span>Entradas:</span> <strong id="ofac-entradas">—</strong></div>
+              <div class="estado-item"><span>Actualización:</span> <strong id="ofac-fecha">—</strong></div>
+              <div class="estado-item"><span>Caché en disco:</span> <strong id="ofac-cache">—</strong></div>
+            </div>
+          </div>
+
+          <!-- UE -->
+          <div class="estado-card" id="estado-ue">
+            <div class="estado-logo ue-grande">🇪🇺</div>
+            <h3>Sanciones Financieras UE (Art. 41)</h3>
+            <p class="estado-url">webgate.ec.europa.eu/fsd/fsf</p>
+            <div id="ue-estado-info">
+              <div class="estado-item"><span>Estado:</span> <strong id="ue-cargada">Verificando…</strong></div>
+              <div class="estado-item"><span>Entradas:</span> <strong id="ue-entradas">—</strong></div>
+              <div class="estado-item"><span>Actualización:</span> <strong id="ue-fecha">—</strong></div>
+              <div class="estado-item"><span>Caché en disco:</span> <strong id="ue-cache">—</strong></div>
+            </div>
+            <form id="form-ue-manual" class="form-ue-manual">
+              <input type="file" id="ue-archivo-manual" accept=".xml" />
+              <button type="submit" class="btn-secundario btn-chico">Cargar XML manualmente</button>
+            </form>
+            <p class="advertencia-actualizacion">Si la descarga automática falla (bloqueo de red del portal de la UE), descargue el XML desde
+              <span class="mono">webgate.ec.europa.eu/fsd/fsf</span> en un navegador y cárguelo aquí.</p>
+          </div>
+        </div>
+
+        <div class="acciones-listas">
+          <button id="btn-forzar-actualizacion" class="btn-peligro">
+            ⬇ Forzar Descarga de Listas Ahora (ONU, OFAC, UE)
+          </button>
+          <p class="advertencia-actualizacion">
+            ⚠ La descarga puede tardar varios minutos. Las listas tienen un tamaño de decenas de MB.
+          </p>
+        </div>
+
+        <div id="actualizacion-resultado" class="oculto mensaje-info"></div>
+      </div>
+
+      <!-- PEP Panamá -->
+      <div class="tarjeta">
+        <h2>Personas Expuestas Políticamente — PEP Panamá (Art. 34, Ley 23 de 2015)</h2>
+        <p class="subtitulo">
+          Incluye presidente, vicepresidente, ministros, magistrados de la Corte Suprema, diputados,
+          directores de empresas estatales, alcaldes, gobernadores, Tribunal Electoral, Procurador,
+          Contralor, Defensor del Pueblo, sus familiares cercanos y colaboradores. Esta lista debe ser
+          mantenida por el Oficial de Cumplimiento.
+        </p>
+
+        <form id="form-nuevo-pep" class="form-pep">
+          <input type="text" id="pep-nombre" placeholder="Nombre completo" maxlength="200" required />
+          <input type="text" id="pep-cargo" placeholder="Cargo" maxlength="150" />
+          <select id="pep-categoria"></select>
+          <input type="text" id="pep-vinculado" placeholder="Si es familiar/colaborador: nombre del PEP vinculado" maxlength="200" />
+          <button type="submit" class="btn-secundario">+ Agregar PEP</button>
+        </form>
+        <div id="error-pep" class="mensaje-error oculto"></div>
+
+        <div id="tabla-pep-contenedor" class="tabla-scroll">
+          <table class="tabla-historial" id="tabla-pep">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Cargo</th>
+                <th>Categoría (Art. 34)</th>
+                <th>Vinculado a</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody-pep">
+              <tr><td colspan="5" class="cargando-msg">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- GAFI -->
+      <div class="tarjeta">
+        <h2>Países de Alto Riesgo — GAFI/FATF (Art. 41, Ley 23 de 2015)</h2>
+        <p class="subtitulo">
+          Cuando el cliente declara nacionalidad o país de un país en la lista negra o gris del GAFI,
+          el sistema muestra la alerta "Diligencia Ampliada Requerida". Verifique y actualice esta lista
+          periódicamente en <span class="mono">fatf-gafi.org/en/countries/black-and-grey-lists.html</span>.
+        </p>
+
+        <form id="form-nuevo-gafi" class="form-gafi">
+          <input type="text" id="gafi-nombre" placeholder="País" maxlength="80" required />
+          <input type="text" id="gafi-codigo" placeholder="Código ISO (ej: VE)" maxlength="5" />
+          <select id="gafi-lista">
+            <option value="gris">Lista gris (mayor monitoreo)</option>
+            <option value="negra">Lista negra (alto riesgo — acción urgente)</option>
+          </select>
+          <button type="submit" class="btn-secundario">+ Agregar País</button>
+        </form>
+        <div id="error-gafi" class="mensaje-error oculto"></div>
+
+        <div class="gafi-columnas">
+          <div>
+            <h3 class="gafi-titulo-negra">⬛ Lista Negra — Alto Riesgo (Acción Urgente)</h3>
+            <ul id="lista-gafi-negra" class="gafi-lista"></ul>
+          </div>
+          <div>
+            <h3 class="gafi-titulo-gris">⬜ Lista Gris — Mayor Monitoreo</h3>
+            <ul id="lista-gafi-gris" class="gafi-lista"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="tarjeta fuentes-info">
+        <h3>Fuentes Oficiales y Bases Legales Consultadas</h3>
+        <ul>
+          <li><strong>ONU — Consejo de Seguridad (Art. 41):</strong> Lista Consolidada de Sanciones.</li>
+          <li><strong>OFAC — Departamento del Tesoro EE.UU. (Art. 41):</strong> Specially Designated Nationals (SDN).</li>
+          <li><strong>Unión Europea (Art. 41):</strong> EU Financial Sanctions Files (FSF).</li>
+          <li><strong>PEP Panamá (Art. 34):</strong> Registro interno de Personas Expuestas Políticamente.</li>
+          <li><strong>GAFI/FATF (Art. 41):</strong> Países de alto riesgo — lista negra y lista gris.</li>
+        </ul>
+        <p class="base-legal">
+          <strong>Base legal:</strong> Ley 23 de 27 de abril de 2015 (Panamá) — "Que adopta medidas para prevenir el blanqueo de capitales, el financiamiento del terrorismo y el financiamiento de la proliferación de armas de destrucción masiva, y dicta otras disposiciones."
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="pie">
+    <p>Sistema AML/FT · Ley 23 de 2015 · República de Panamá · Solo para uso autorizado</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

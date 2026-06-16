@@ -1,0 +1,22 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno / secretos
+.env
+
+# Datos generados y cacheados en tiempo de ejecución
+datos/consultas.db
+datos/onu_consolidated.xml
+datos/ofac_sdn.xml
+datos/eu_sanctions.xml
+datos/clientes/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema
+.DS_Store
+
+# Configuración local de Claude Code (específica de esta máquina)
+.claude/settings.local.json

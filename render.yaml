@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: aml-panama
+    runtime: node
+    plan: starter        # plan de pago: necesario para que el servicio no "duerma" y para usar disco persistente
+    region: oregon        # cambia a la región que prefieras (oregon, ohio, frankfurt, singapore)
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false        # se configura manualmente en el dashboard de Render (no se sube a git)
+      - key: NODE_VERSION
+        value: 18.20.4
+    disk:
+      name: aml-panama-datos
+      mountPath: /opt/render/project/src/datos
+      sizeGB: 1

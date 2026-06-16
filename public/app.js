@@ -1,0 +1,854 @@
+'use strict';
+
+// ── Estado de sesión simple (recordar nombre de usuario entre acciones) ──────
+let usuarioActual = sessionStorage.getItem('amlUsuario') || '';
+let clienteEnFicha = null; // cliente actualmente abierto en la ficha
+
+// ── Tabs ──────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const id = btn.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('activo'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('activo'));
+    btn.classList.add('activo');
+    document.getElementById(`tab-${id}`).classList.add('activo');
+    if (id === 'historial') cargarHistorial();
+    if (id === 'estado')    { cargarEstadoListas(); cargarPep(); cargarGafi(); }
+    if (id === 'clientes')  mostrarVistaListaClientes();
+  });
+});
+
+function activarTab(id) {
+  document.querySelector(`.tab[data-tab="${id}"]`)?.click();
+}
+
+// ── Formulario de consulta ────────────────────────────────
+const form       = document.getElementById('form-consulta');
+const btnBuscar  = document.getElementById('btn-buscar');
+const errForm    = document.getElementById('error-form');
+const cargando   = document.getElementById('cargando');
+const resultCont = document.getElementById('resultado-contenedor');
+const inputUsuario = document.getElementById('usuario');
+
+if (usuarioActual) inputUsuario.value = usuarioActual;
+inputUsuario.addEventListener('change', () => {
+  usuarioActual = inputUsuario.value.trim();
+  sessionStorage.setItem('amlUsuario', usuarioActual);
+});
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const nombre    = document.getElementById('nombre').value.trim();
+  const cedula    = document.getElementById('cedula').value.trim();
+  const pais      = document.getElementById('pais').value.trim();
+  const usuario   = document.getElementById('usuario').value.trim();
+  const clienteId = document.getElementById('cliente-id').value || null;
+
+  errForm.classList.add('oculto');
+  resultCont.classList.add('oculto');
+
+  if (!nombre && !cedula) {
+    mostrarError(errForm, 'Por favor ingrese al menos un nombre o número de cédula/pasaporte.');
+    return;
+  }
+  if (nombre && nombre.length < 3) {
+    mostrarError(errForm, 'El nombre debe tener al menos 3 caracteres.');
+    return;
+  }
+  if (cedula && cedula.replace(/[-\s]/g, '').length < 4) {
+    mostrarError(errForm, 'La cédula o ID debe tener al menos 4 caracteres.');
+    return;
+  }
+
+  btnBuscar.disabled = true;
+  btnBuscar.querySelector('.btn-texto').textContent = 'Consultando…';
+  cargando.classList.remove('oculto');
+
+  try {
+    const res  = await fetch('/api/consultar', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ nombre, cedula, pais, usuario, clienteId }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      mostrarError(errForm, data.error || 'Error al realizar la consulta.');
+      return;
+    }
+
+    renderizarResultado(data);
+  } catch (err) {
+    mostrarError(errForm, `Error de conexión: ${err.message}`);
+  } finally {
+    btnBuscar.disabled = false;
+    btnBuscar.querySelector('.btn-texto').textContent = 'Consultar Listas de Sanciones';
+    cargando.classList.add('oculto');
+  }
+});
+
+// ── Renderizar resultado ──────────────────────────────────
+function renderizarResultado(data) {
+  const { consultaId, fecha, hora, nombre, cedula, pais, hayCoincidencia, onuHits, ofacHits, ueHits, pepHits, gafiResultado, errores } = data;
+
+  // Veredicto
+  const banner = document.getElementById('veredicto-banner');
+  banner.className = `veredicto-banner ${hayCoincidencia ? 'coincidencia' : 'sin-coincidencia'}`;
+  document.getElementById('veredicto-icono').textContent = hayCoincidencia ? '⚠' : '✓';
+  document.getElementById('veredicto-texto').textContent = hayCoincidencia
+    ? 'COINCIDENCIA DETECTADA — ALERTA AML/FT'
+    : 'SIN COINCIDENCIAS EN LISTAS DE SANCIONES';
+
+  // Metadata
+  document.getElementById('meta-id').textContent    = consultaId;
+  document.getElementById('meta-fecha').textContent = fecha;
+  document.getElementById('meta-hora').textContent  = hora;
+  document.getElementById('meta-nombre').textContent = nombre || '—';
+  document.getElementById('meta-cedula').textContent = cedula || '—';
+  document.getElementById('meta-pais').textContent   = pais   || '—';
+  document.getElementById('btn-pdf').href = `/api/reporte/${consultaId}`;
+
+  // Alerta GAFI
+  const alertaGafi = document.getElementById('alerta-gafi');
+  if (gafiResultado && gafiResultado.coincide) {
+    alertaGafi.className = 'tarjeta alerta-gafi alerta-gafi-activa';
+    alertaGafi.innerHTML = `
+      <div class="alerta-gafi-titulo">⚠ DILIGENCIA AMPLIADA REQUERIDA — Art. 41, Ley 23 de 2015</div>
+      <p>El país declarado <strong>${esc(gafiResultado.pais)}</strong> se encuentra en la
+      <strong>lista ${gafiResultado.lista === 'negra' ? 'NEGRA (alto riesgo — acción urgente)' : 'GRIS (mayor monitoreo)'}</strong>
+      del GAFI/FATF. Debe aplicarse debida diligencia ampliada conforme a la Ley 23 de 2015.</p>`;
+    alertaGafi.classList.remove('oculto');
+  } else if (gafiResultado) {
+    alertaGafi.className = 'tarjeta alerta-gafi alerta-gafi-ok';
+    alertaGafi.innerHTML = `<p>✓ El país declarado (<strong>${esc(gafiResultado.paisConsultado || '')}</strong>) no se encuentra en las listas GAFI/FATF de alto riesgo (Art. 41).</p>`;
+    alertaGafi.classList.remove('oculto');
+  } else {
+    alertaGafi.classList.add('oculto');
+  }
+
+  // ONU / OFAC / UE / PEP
+  renderizarHits('onu', onuHits || []);
+  renderizarHits('ofac', ofacHits || []);
+  renderizarHits('ue', ueHits || []);
+  renderizarHits('pep', pepHits || []);
+
+  // Errores de listas (si alguna falló)
+  const errDiv = document.getElementById('errores-consulta');
+  if (errores && errores.length) {
+    errDiv.textContent = '⚠ Advertencia: ' + errores.join(' | ');
+    errDiv.classList.remove('oculto');
+  } else {
+    errDiv.classList.add('oculto');
+  }
+
+  resultCont.classList.remove('oculto');
+  resultCont.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderizarHits(fuente, hits) {
+  const contenedor = document.getElementById(`resultados-${fuente}`);
+  const badge      = document.getElementById(`badge-${fuente}`);
+
+  if (hits.length === 0) {
+    badge.className = 'badge ok';
+    badge.textContent = '✓ Sin coincidencias';
+    contenedor.innerHTML = `
+      <div class="sin-resultado">
+        <span>✓</span>
+        <span>No se encontraron coincidencias en esta lista.</span>
+      </div>`;
+    return;
+  }
+
+  badge.className = 'badge alerta';
+  badge.textContent = `⚠ ${hits.length} coincidencia(s)`;
+
+  contenedor.innerHTML = hits.map(hit => {
+    const nombres = (hit.nombres || []).slice(0, 4).join(' / ') || '—';
+    const extras = [];
+    if (hit.listaTipo)  extras.push(`<span><strong>Lista:</strong> ${esc(hit.listaTipo)}</span>`);
+    if (hit.programas)  extras.push(`<span><strong>Programas:</strong> ${esc(hit.programas)}</span>`);
+    if (hit.listedOn)   extras.push(`<span><strong>Incluido:</strong> ${esc(hit.listedOn)}</span>`);
+    if (hit.nacionalidad) extras.push(`<span><strong>Nac.:</strong> ${esc(hit.nacionalidad)}</span>`);
+    if (hit.cargo)       extras.push(`<span><strong>Cargo:</strong> ${esc(hit.cargo)}</span>`);
+    if (hit.vinculadoA)  extras.push(`<span><strong>Vinculado a:</strong> ${esc(hit.vinculadoA)}</span>`);
+
+    return `
+      <div class="hit-card">
+        <div class="hit-header">
+          <span class="hit-tipo">${esc(hit.tipo || 'Desconocido')}</span>
+          <span class="hit-fuente">${esc(hit.fuente || fuente.toUpperCase())}</span>
+          <span class="hit-ref">Ref/ID: ${esc(hit.refNumero || hit.id || '—')}</span>
+        </div>
+        <div class="hit-nombres">${esc(nombres)}</div>
+        ${extras.length ? `<div class="hit-detalle">${extras.join('')}</div>` : ''}
+        <div class="hit-razon">🔎 ${esc(hit.razonMatch || '—')}</div>
+      </div>`;
+  }).join('');
+}
+
+// ── Historial ─────────────────────────────────────────────
+async function cargarHistorial() {
+  const tbody = document.getElementById('tbody-historial');
+  tbody.innerHTML = '<tr><td colspan="15" class="cargando-msg">Cargando…</td></tr>';
+
+  const params = new URLSearchParams();
+  const desde = document.getElementById('filtro-fecha-desde').value;
+  const hasta = document.getElementById('filtro-fecha-hasta').value;
+  const resultado = document.getElementById('filtro-resultado').value;
+  if (desde) params.set('fechaDesde', desde);
+  if (hasta) params.set('fechaHasta', hasta);
+  if (resultado) params.set('resultado', resultado);
+
+  try {
+    const res  = await fetch(`/api/historial?${params.toString()}`);
+    const rows = await res.json();
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="15" class="cargando-msg">No hay consultas registradas para estos filtros.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+      const claseRow = r.coincidencia ? 'es-alerta' : '';
+      const veredicto = r.coincidencia
+        ? '<span class="resultado-alerta">⚠ COINCIDENCIA</span>'
+        : '<span class="resultado-ok">✓ LIMPIO</span>';
+      const celda = (val) => `<td class="${val && val !== 'Sin coincidencias' && val !== 'Sin alerta' && val !== 'No evaluado (sin país)' ? 'resultado-alerta' : 'resultado-sin'}">${esc(val || '—')}</td>`;
+      return `
+        <tr class="${claseRow}">
+          <td>${r.id}</td>
+          <td>${esc(r.fecha)}</td>
+          <td>${esc(r.hora)}</td>
+          <td>${esc(r.nombre || '—')}</td>
+          <td>${esc(r.cedula || '—')}</td>
+          <td>${esc(r.pais || '—')}</td>
+          <td>${esc(r.usuario || '—')}</td>
+          <td>${r.cliente_nombre ? esc(r.cliente_nombre) : '—'}</td>
+          ${celda(r.resultado_onu)}
+          ${celda(r.resultado_ofac)}
+          ${celda(r.resultado_ue)}
+          ${celda(r.resultado_pep)}
+          ${celda(r.resultado_gafi)}
+          <td>${veredicto}</td>
+          <td><a href="/api/reporte/${r.id}" target="_blank" class="link-pdf">📄 PDF</a></td>
+        </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="15" class="cargando-msg">Error al cargar historial: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('btn-actualizar-historial').addEventListener('click', cargarHistorial);
+document.getElementById('btn-filtrar-historial').addEventListener('click', cargarHistorial);
+document.getElementById('btn-limpiar-filtros').addEventListener('click', () => {
+  document.getElementById('filtro-fecha-desde').value = '';
+  document.getElementById('filtro-fecha-hasta').value = '';
+  document.getElementById('filtro-resultado').value = '';
+  cargarHistorial();
+});
+
+// ── Estado de listas ──────────────────────────────────────
+async function cargarEstadoListas() {
+  try {
+    const res  = await fetch('/api/estado-listas');
+    const data = await res.json();
+    actualizarBarraEstado(data);
+    renderizarEstadoLista('onu', data.onu);
+    renderizarEstadoLista('ofac', data.ofac);
+    renderizarEstadoLista('ue', data.ue);
+  } catch (err) {
+    console.warn('Error al cargar estado de listas:', err.message);
+  }
+}
+
+function renderizarEstadoLista(id, info) {
+  const cargada = document.getElementById(`${id}-cargada`);
+  const entradas = document.getElementById(`${id}-entradas`);
+  const fecha   = document.getElementById(`${id}-fecha`);
+  const cache   = document.getElementById(`${id}-cache`);
+
+  if (info.cargada) {
+    cargada.textContent = '✓ Cargada en memoria';
+    cargada.className   = 'texto-ok';
+  } else if (info.error) {
+    cargada.textContent = `✗ Error: ${info.error}`;
+    cargada.className   = 'texto-error';
+  } else {
+    cargada.textContent = '⏳ Descargando…';
+    cargada.className   = 'texto-warn';
+  }
+
+  entradas.textContent = info.entradas
+    ? info.entradas.toLocaleString('es-PA') + ' registros'
+    : '—';
+
+  if (info.ultimaActualizacion) {
+    const d = new Date(info.ultimaActualizacion);
+    fecha.textContent = d.toLocaleString('es-PA', { timeZone: 'America/Panama' });
+  } else {
+    fecha.textContent = '—';
+  }
+
+  cache.textContent = info.cacheDisco ? '✓ Sí' : '✗ No';
+  cache.className   = info.cacheDisco ? 'texto-ok' : 'texto-warn';
+}
+
+function actualizarBarraEstado(data) {
+  const barra = document.getElementById('barra-estado');
+  const onuOk  = data.onu.cargada;
+  const ofacOk = data.ofac.cargada;
+  const ueOk   = data.ue.cargada;
+
+  if (onuOk && ofacOk) {
+    let txt = `✓ Listas activas — ONU: ${data.onu.entradas.toLocaleString('es-PA')} | OFAC: ${data.ofac.entradas.toLocaleString('es-PA')}`;
+    txt += ueOk ? ` | UE: ${data.ue.entradas.toLocaleString('es-PA')}` : ' | UE: pendiente de carga';
+    barra.className = ueOk ? 'barra-estado ok' : 'barra-estado warn';
+    barra.textContent = txt;
+  } else if (!onuOk && !ofacOk) {
+    barra.className = 'barra-estado warn';
+    barra.textContent = '⚠ Las listas de sanciones están descargándose. Las primeras consultas pueden tardar unos minutos.';
+  } else {
+    barra.className = 'barra-estado warn';
+    const pendiente = !onuOk ? 'ONU' : 'OFAC';
+    barra.textContent = `⚠ Lista ${pendiente} aún cargando. Resto disponible.`;
+  }
+}
+
+// ── Forzar actualización (ONU, OFAC, UE) ──────────────────
+document.getElementById('btn-forzar-actualizacion').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-forzar-actualizacion');
+  const div = document.getElementById('actualizacion-resultado');
+  btn.disabled = true;
+  btn.textContent = '⬇ Descargando… (puede tardar varios minutos)';
+  div.textContent = 'Descargando listas de sanciones. Por favor espere…';
+  div.className = 'mensaje-info';
+  div.classList.remove('oculto');
+
+  try {
+    const res  = await fetch('/api/actualizar-listas', { method: 'POST' });
+    const data = await res.json();
+    let msg = `✓ Actualización completada — ONU: ${data.onu.entradas.toLocaleString('es-PA')} | OFAC: ${data.ofac.entradas.toLocaleString('es-PA')} | UE: ${data.ue.entradas.toLocaleString('es-PA')}`;
+    if (data.errores) msg += ` | Errores: ${data.errores.join('; ')}`;
+    div.textContent = msg;
+    await cargarEstadoListas();
+  } catch (err) {
+    div.className = 'mensaje-error';
+    div.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⬇ Forzar Descarga de Listas Ahora (ONU, OFAC, UE)';
+  }
+});
+
+// ── Carga manual de la lista UE ───────────────────────────
+document.getElementById('form-ue-manual').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fileInput = document.getElementById('ue-archivo-manual');
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const div = document.getElementById('actualizacion-resultado');
+  div.className = 'mensaje-info';
+  div.textContent = 'Cargando archivo XML de la UE…';
+  div.classList.remove('oculto');
+
+  const formData = new FormData();
+  formData.append('archivo', file);
+
+  try {
+    const res  = await fetch('/api/listas/ue/cargar-manual', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cargar el archivo.');
+    div.className = 'mensaje-info';
+    div.textContent = `✓ Lista UE cargada manualmente — ${data.entradas.toLocaleString('es-PA')} registros.`;
+    await cargarEstadoListas();
+  } catch (err) {
+    div.className = 'mensaje-error';
+    div.textContent = `Error: ${err.message}`;
+  } finally {
+    fileInput.value = '';
+  }
+});
+
+// ── PEP Panamá ─────────────────────────────────────────────
+async function cargarPep() {
+  const tbody = document.getElementById('tbody-pep');
+  const selectCategoria = document.getElementById('pep-categoria');
+  try {
+    const res  = await fetch('/api/pep');
+    const data = await res.json();
+
+    if (!selectCategoria.dataset.cargado) {
+      selectCategoria.innerHTML = data.categorias.map(c =>
+        `<option value="${esc(c.id)}">${esc(c.nombre)} (${esc(c.articulo)})</option>`
+      ).join('');
+      selectCategoria.dataset.cargado = '1';
+    }
+
+    if (!data.personas.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="cargando-msg">No hay personas registradas. Agregue PEP usando el formulario superior.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.personas.map(p => `
+      <tr>
+        <td>${esc(p.nombre)}</td>
+        <td>${esc(p.cargo || '—')}</td>
+        <td>${esc(p.categoria ? `${p.categoria.nombre} (${p.categoria.articulo})` : (p.categoria_id || '—'))}</td>
+        <td>${esc(p.vinculado_a || '—')}</td>
+        <td><button class="btn-borrar" data-id="${p.id}" data-tipo="pep">✕</button></td>
+      </tr>`).join('');
+
+    tbody.querySelectorAll('.btn-borrar').forEach(btn => btn.addEventListener('click', borrarRegistroLista));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('form-nuevo-pep').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-pep');
+  err.classList.add('oculto');
+
+  const body = {
+    nombre     : document.getElementById('pep-nombre').value.trim(),
+    cargo      : document.getElementById('pep-cargo').value.trim(),
+    categoriaId: document.getElementById('pep-categoria').value,
+    vinculadoA : document.getElementById('pep-vinculado').value.trim(),
+    usuario    : usuarioActual,
+  };
+
+  try {
+    const res  = await fetch('/api/pep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al agregar PEP.');
+    document.getElementById('form-nuevo-pep').reset();
+    cargarPep();
+  } catch (e2) {
+    mostrarError(err, e2.message);
+  }
+});
+
+// ── GAFI ───────────────────────────────────────────────────
+async function cargarGafi() {
+  const negra = document.getElementById('lista-gafi-negra');
+  const gris  = document.getElementById('lista-gafi-gris');
+  try {
+    const res  = await fetch('/api/gafi');
+    const data = await res.json();
+
+    const itemHtml = (p) => `<li>${esc(p.nombre)}${p.codigo ? ` (${esc(p.codigo)})` : ''} <button class="btn-borrar-mini" data-id="${p.id}" data-tipo="gafi">✕</button></li>`;
+
+    const negras = data.paises.filter(p => p.lista === 'negra');
+    const grises = data.paises.filter(p => p.lista === 'gris');
+
+    negra.innerHTML = negras.length ? negras.map(itemHtml).join('') : '<li class="gafi-vacio">Sin países registrados.</li>';
+    gris.innerHTML  = grises.length ? grises.map(itemHtml).join('') : '<li class="gafi-vacio">Sin países registrados.</li>';
+
+    document.querySelectorAll('.btn-borrar-mini').forEach(btn => btn.addEventListener('click', borrarRegistroLista));
+  } catch (err) {
+    negra.innerHTML = `<li class="gafi-vacio">Error: ${esc(err.message)}</li>`;
+  }
+}
+
+document.getElementById('form-nuevo-gafi').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-gafi');
+  err.classList.add('oculto');
+
+  const body = {
+    nombre: document.getElementById('gafi-nombre').value.trim(),
+    codigo: document.getElementById('gafi-codigo').value.trim(),
+    lista : document.getElementById('gafi-lista').value,
+  };
+
+  try {
+    const res  = await fetch('/api/gafi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al agregar país.');
+    document.getElementById('form-nuevo-gafi').reset();
+    cargarGafi();
+  } catch (e2) {
+    mostrarError(err, e2.message);
+  }
+});
+
+async function borrarRegistroLista(e) {
+  const id   = e.currentTarget.dataset.id;
+  const tipo = e.currentTarget.dataset.tipo;
+  if (!confirm('¿Eliminar este registro?')) return;
+  try {
+    await fetch(`/api/${tipo}/${id}`, { method: 'DELETE' });
+    if (tipo === 'pep')  cargarPep();
+    if (tipo === 'gafi') cargarGafi();
+  } catch (err) {
+    alert(`Error al eliminar: ${err.message}`);
+  }
+}
+
+// ── CLIENTES ───────────────────────────────────────────────
+const vistaListaClientes = document.getElementById('clientes-vista-lista');
+const vistaFichaCliente   = document.getElementById('clientes-vista-ficha');
+
+function mostrarVistaListaClientes() {
+  vistaListaClientes.classList.remove('oculto');
+  vistaFichaCliente.classList.add('oculto');
+  cargarClientes();
+}
+
+function mostrarVistaFichaCliente() {
+  vistaListaClientes.classList.add('oculto');
+  vistaFichaCliente.classList.remove('oculto');
+}
+
+async function cargarClientes(buscar) {
+  const tbody = document.getElementById('tbody-clientes');
+  tbody.innerHTML = '<tr><td colspan="6" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const params = buscar ? `?buscar=${encodeURIComponent(buscar)}` : '';
+    const res  = await fetch(`/api/clientes${params}`);
+    const rows = await res.json();
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="cargando-msg">No hay clientes registrados. Cree uno con "+ Nuevo Cliente".</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(c => `
+      <tr>
+        <td>${esc(c.nombre)}</td>
+        <td>${esc(c.cedula || '—')}</td>
+        <td>${c.tipo === 'juridica' ? 'Jurídica' : 'Natural'}</td>
+        <td>${esc(c.nacionalidad || '—')}</td>
+        <td>${esc((c.creado_en || '').split(' ')[0] || '—')}</td>
+        <td><button class="btn-secundario btn-chico btn-ver-ficha" data-id="${c.id}">Ver ficha</button></td>
+      </tr>`).join('');
+
+    tbody.querySelectorAll('.btn-ver-ficha').forEach(btn =>
+      btn.addEventListener('click', () => abrirFichaCliente(btn.dataset.id))
+    );
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+let debounceBuscarCliente = null;
+document.getElementById('buscar-cliente').addEventListener('input', e => {
+  clearTimeout(debounceBuscarCliente);
+  debounceBuscarCliente = setTimeout(() => cargarClientes(e.target.value.trim()), 250);
+});
+
+document.getElementById('btn-nuevo-cliente').addEventListener('click', () => {
+  document.getElementById('form-nuevo-cliente-tarjeta').classList.remove('oculto');
+});
+document.getElementById('btn-cancelar-nuevo-cliente').addEventListener('click', () => {
+  document.getElementById('form-nuevo-cliente-tarjeta').classList.add('oculto');
+  document.getElementById('form-nuevo-cliente').reset();
+});
+
+document.getElementById('form-nuevo-cliente').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-nuevo-cliente');
+  err.classList.add('oculto');
+
+  const body = {
+    nombre         : document.getElementById('nc-nombre').value.trim(),
+    cedula         : document.getElementById('nc-cedula').value.trim(),
+    tipo           : document.getElementById('nc-tipo').value,
+    nacionalidad   : document.getElementById('nc-nacionalidad').value.trim(),
+    fechaNacimiento: document.getElementById('nc-fecha-nacimiento').value.trim(),
+    notas          : document.getElementById('nc-notas').value.trim(),
+    usuario        : usuarioActual,
+  };
+
+  if (!body.nombre) {
+    mostrarError(err, 'El nombre del cliente es obligatorio.');
+    return;
+  }
+
+  try {
+    const res  = await fetch('/api/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al crear el cliente.');
+    document.getElementById('form-nuevo-cliente').reset();
+    document.getElementById('form-nuevo-cliente-tarjeta').classList.add('oculto');
+    cargarClientes();
+    abrirFichaCliente(data.id);
+  } catch (e2) {
+    mostrarError(err, e2.message);
+  }
+});
+
+async function abrirFichaCliente(id) {
+  try {
+    const res  = await fetch(`/api/clientes/${id}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo cargar el cliente.');
+
+    clienteEnFicha = data.cliente;
+    renderizarFicha(data.cliente, data.documentos, data.historial);
+    mostrarVistaFichaCliente();
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
+function renderizarFicha(cliente, documentos, historial) {
+  document.getElementById('ficha-nombre').textContent = cliente.nombre;
+  document.getElementById('ficha-cedula').textContent = cliente.cedula || '—';
+  document.getElementById('ficha-tipo').textContent = cliente.tipo === 'juridica' ? 'Persona jurídica' : 'Persona natural';
+  document.getElementById('ficha-nacionalidad').textContent = cliente.nacionalidad || '—';
+  document.getElementById('ficha-fecha-nacimiento').textContent = cliente.fecha_nacimiento || '—';
+  document.getElementById('ficha-creado').textContent = cliente.creado_en || '—';
+
+  document.getElementById('form-editar-cliente').classList.add('oculto');
+
+  renderizarDocumentos(cliente.id, documentos);
+  renderizarHistorialCliente(historial);
+}
+
+function renderizarDocumentos(clienteId, documentos) {
+  const cont = document.getElementById('lista-documentos-cliente');
+  if (!documentos.length) {
+    cont.innerHTML = '<p class="cargando-msg">No hay documentos subidos aún.</p>';
+    return;
+  }
+
+  const etiquetas = {
+    pasaporte: 'Pasaporte', cedula: 'Cédula', pacto_social: 'Pacto Social',
+    estados_financieros: 'Estados Financieros', ruc: 'RUC', otro: 'Otro',
+  };
+
+  cont.innerHTML = documentos.map(d => `
+    <div class="documento-item">
+      <span class="documento-tipo">${esc(etiquetas[d.tipo_documento] || d.tipo_documento || 'Otro')}</span>
+      <span class="documento-nombre">${esc(d.nombre_original)}</span>
+      <span class="documento-fecha">${esc((d.subido_en || '').split(' ')[0] || '')}</span>
+      <a class="btn-secundario btn-chico" href="/api/clientes/${clienteId}/documentos/${d.id}/descargar" target="_blank">⬇ Descargar</a>
+      <button class="btn-borrar btn-borrar-doc" data-cliente="${clienteId}" data-id="${d.id}">✕</button>
+    </div>`).join('');
+
+  cont.querySelectorAll('.btn-borrar-doc').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('¿Eliminar este documento?')) return;
+    try {
+      await fetch(`/api/clientes/${btn.dataset.cliente}/documentos/${btn.dataset.id}`, { method: 'DELETE' });
+      abrirFichaCliente(btn.dataset.cliente);
+    } catch (err) {
+      alert(`Error al eliminar: ${err.message}`);
+    }
+  }));
+}
+
+function renderizarHistorialCliente(historial) {
+  const tbody = document.getElementById('tbody-historial-cliente');
+  if (!historial.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="cargando-msg">Sin búsquedas AML registradas para este cliente.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = historial.map(h => {
+    const veredicto = h.coincidencia
+      ? '<span class="resultado-alerta">⚠ COINCIDENCIA</span>'
+      : '<span class="resultado-ok">✓ LIMPIO</span>';
+    return `
+      <tr class="${h.coincidencia ? 'es-alerta' : ''}">
+        <td>${h.id}</td>
+        <td>${esc(h.fecha)}</td>
+        <td>${esc(h.hora)}</td>
+        <td>${esc(h.usuario || '—')}</td>
+        <td>${veredicto}</td>
+        <td><a href="/api/reporte/${h.id}" target="_blank" class="link-pdf">📄 PDF</a></td>
+      </tr>`;
+  }).join('');
+}
+
+document.getElementById('btn-volver-clientes').addEventListener('click', mostrarVistaListaClientes);
+
+document.getElementById('btn-editar-cliente').addEventListener('click', () => {
+  const f = document.getElementById('form-editar-cliente');
+  if (!clienteEnFicha) return;
+  document.getElementById('ec-nombre').value = clienteEnFicha.nombre || '';
+  document.getElementById('ec-cedula').value = clienteEnFicha.cedula || '';
+  document.getElementById('ec-tipo').value = clienteEnFicha.tipo || 'natural';
+  document.getElementById('ec-nacionalidad').value = clienteEnFicha.nacionalidad || '';
+  document.getElementById('ec-fecha-nacimiento').value = clienteEnFicha.fecha_nacimiento || '';
+  document.getElementById('ec-notas').value = clienteEnFicha.notas || '';
+  f.classList.remove('oculto');
+});
+document.getElementById('btn-cancelar-editar-cliente').addEventListener('click', () => {
+  document.getElementById('form-editar-cliente').classList.add('oculto');
+});
+
+document.getElementById('form-editar-cliente').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!clienteEnFicha) return;
+  const body = {
+    nombre         : document.getElementById('ec-nombre').value.trim(),
+    cedula         : document.getElementById('ec-cedula').value.trim(),
+    tipo           : document.getElementById('ec-tipo').value,
+    nacionalidad   : document.getElementById('ec-nacionalidad').value.trim(),
+    fechaNacimiento: document.getElementById('ec-fecha-nacimiento').value.trim(),
+    notas          : document.getElementById('ec-notas').value.trim(),
+  };
+  try {
+    const res  = await fetch(`/api/clientes/${clienteEnFicha.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar.');
+    clienteEnFicha = data;
+    abrirFichaCliente(data.id);
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+});
+
+document.getElementById('form-subir-documento').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-subir-doc');
+  err.classList.add('oculto');
+  if (!clienteEnFicha) return;
+
+  const fileInput = document.getElementById('doc-archivo');
+  const file = fileInput.files[0];
+  if (!file) {
+    mostrarError(err, 'Seleccione un archivo PDF o imagen.');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('documento', file);
+  formData.append('tipoDocumento', document.getElementById('doc-tipo').value);
+  formData.append('usuario', usuarioActual);
+
+  try {
+    const res  = await fetch(`/api/clientes/${clienteEnFicha.id}/documentos`, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al subir el documento.');
+    fileInput.value = '';
+    abrirFichaCliente(clienteEnFicha.id);
+  } catch (e2) {
+    mostrarError(err, e2.message);
+  }
+});
+
+// Botón "Buscar AML de este cliente" — pasa a la pestaña de consulta con los datos precargados
+document.getElementById('btn-buscar-aml-cliente').addEventListener('click', () => {
+  if (!clienteEnFicha) return;
+
+  document.getElementById('nombre').value = clienteEnFicha.nombre || '';
+  document.getElementById('cedula').value = clienteEnFicha.cedula || '';
+  document.getElementById('pais').value   = clienteEnFicha.nacionalidad || '';
+  document.getElementById('cliente-id').value = clienteEnFicha.id;
+
+  const banner = document.getElementById('banner-cliente-vinculado');
+  banner.textContent = `🔗 Esta búsqueda se vinculará y guardará en el expediente de: ${clienteEnFicha.nombre}`;
+  banner.classList.remove('oculto');
+
+  activarTab('consulta');
+  form.dispatchEvent(new Event('submit'));
+});
+
+// ── Lectura automática de documento de identidad ─────────
+const btnSubirDoc  = document.getElementById('btn-subir-documento');
+const fileDoc      = document.getElementById('file-documento');
+const docInfo      = document.getElementById('doc-info');
+
+btnSubirDoc.addEventListener('click', () => fileDoc.click());
+
+fileDoc.addEventListener('change', async () => {
+  const file = fileDoc.files[0];
+  if (!file) return;
+
+  errForm.classList.add('oculto');
+  docInfo.classList.add('oculto');
+  resultCont.classList.add('oculto');
+
+  btnSubirDoc.disabled = true;
+  btnSubirDoc.querySelector('.btn-texto').textContent = 'Leyendo documento…';
+  cargando.classList.remove('oculto');
+  cargando.querySelector('p').textContent = 'Analizando documento con inteligencia artificial…';
+
+  const formData = new FormData();
+  formData.append('documento', file);
+
+  try {
+    const res  = await fetch('/api/leer-documento', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      mostrarError(errForm, data.error || 'Error al leer el documento.');
+      return;
+    }
+
+    const camposLlenados = [];
+
+    if (data.nombre) {
+      document.getElementById('nombre').value = data.nombre;
+      camposLlenados.push(`Nombre: ${data.nombre}`);
+    }
+    if (data.cedula) {
+      document.getElementById('cedula').value = data.cedula;
+      camposLlenados.push(`Documento: ${data.cedula}`);
+    }
+    if (data.nacionalidad) {
+      document.getElementById('pais').value = data.nacionalidad;
+      camposLlenados.push(`Nacionalidad: ${data.nacionalidad}`);
+    }
+    if (data.fechaNacimiento) {
+      camposLlenados.push(`Fecha de nacimiento: ${data.fechaNacimiento}`);
+    }
+
+    if (camposLlenados.length === 0) {
+      mostrarError(errForm, 'No se pudieron extraer datos del documento. Verifique que la imagen sea clara.');
+      return;
+    }
+
+    docInfo.textContent = '✓ Datos extraídos: ' + camposLlenados.join(' · ');
+    docInfo.classList.remove('oculto');
+
+    if (data.nombre || data.cedula) {
+      cargando.querySelector('p').textContent = 'Consultando listas de sanciones…';
+      form.dispatchEvent(new Event('submit'));
+    }
+  } catch (err) {
+    mostrarError(errForm, `Error al procesar el documento: ${err.message}`);
+  } finally {
+    btnSubirDoc.disabled = false;
+    btnSubirDoc.querySelector('.btn-texto').textContent = 'Subir documento de identidad';
+    fileDoc.value = '';
+    cargando.querySelector('p').textContent = 'Consultando listas de sanciones internacionales…';
+  }
+});
+
+// ── Utilidades ────────────────────────────────────────────
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function mostrarError(el, msg) {
+  el.textContent = msg;
+  el.classList.remove('oculto');
+}
+
+// ── Polling de estado al cargar ────────────────────────────
+let pollingInterval = null;
+
+async function pollearEstado() {
+  try {
+    const res  = await fetch('/api/estado-listas');
+    const data = await res.json();
+    actualizarBarraEstado(data);
+
+    if (data.onu.cargada && data.ofac.cargada) {
+      clearInterval(pollingInterval);
+      pollingInterval = null;
+    }
+  } catch (_) {}
+}
+
+// Verificar estado inmediatamente y luego cada 8 segundos
+pollearEstado();
+pollingInterval = setInterval(pollearEstado, 8000);
