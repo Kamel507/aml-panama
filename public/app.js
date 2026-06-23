@@ -3,6 +3,8 @@
 // ── Estado de sesión simple (recordar nombre de usuario entre acciones) ──────
 let usuarioActual = sessionStorage.getItem('amlUsuario') || '';
 let clienteEnFicha = null; // cliente actualmente abierto en la ficha
+let contextoExpediente = 'cliente'; // 'cliente' | 'proveedor' — qué lista/ficha se está viendo
+let colabEnFicha = null; // colaborador actualmente abierto en la ficha
 
 // ── Tabs ──────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(btn => {
@@ -16,9 +18,33 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (id === 'alertas')   cargarAlertas();
     if (id === 'ros')       { cargarROS(); cargarSelectClientesROS(); }
     if (id === 'estado')    { cargarEstadoListas(); cargarPep(); cargarGafi(); }
-    if (id === 'clientes')  mostrarVistaListaClientes();
+    if (id === 'clientes') {
+      contextoExpediente = btn.dataset.expediente === 'proveedor' ? 'proveedor' : 'cliente';
+      aplicarContextoExpediente();
+      mostrarVistaListaClientes();
+    }
+    if (id === 'colaboradores') cargarColaboradores();
   });
 });
+
+// ── Contexto cliente / proveedor (mismo motor de debida diligencia) ───────────
+const TXT_EXPEDIENTE = {
+  cliente:   { titulo: 'Expedientes de Clientes',   sub: 'Cree fichas de clientes, suba sus documentos y consulte su historial AML.', nuevoBtn: '+ Nuevo Cliente', formTitulo: 'Nuevo Cliente', crearBtn: 'Crear Ficha de Cliente', buscar: 'Buscar por nombre o cédula…', volver: '← Volver a la lista de clientes', badge: 'CLIENTE' },
+  proveedor: { titulo: 'Expedientes de Proveedores', sub: 'Debida diligencia de proveedores (Decreto 35 de 2022): documentos, beneficiarios finales y tamizaje AML.', nuevoBtn: '+ Nuevo Proveedor', formTitulo: 'Nuevo Proveedor', crearBtn: 'Crear Ficha de Proveedor', buscar: 'Buscar proveedor por nombre o RUC…', volver: '← Volver a la lista de proveedores', badge: 'PROVEEDOR' },
+};
+
+function aplicarContextoExpediente() {
+  const t = TXT_EXPEDIENTE[contextoExpediente];
+  const set = (id, prop, val) => { const el = document.getElementById(id); if (el) el[prop] = val; };
+  set('clientes-titulo-lista', 'textContent', t.titulo);
+  set('clientes-subtitulo-lista', 'textContent', t.sub);
+  set('btn-nuevo-cliente', 'textContent', t.nuevoBtn);
+  set('nc-form-titulo', 'textContent', t.formTitulo);
+  set('btn-crear-cliente', 'textContent', t.crearBtn);
+  const buscar = document.getElementById('buscar-cliente');
+  if (buscar) buscar.placeholder = t.buscar;
+  set('btn-volver-clientes', 'textContent', t.volver);
+}
 
 function activarTab(id) {
   document.querySelector(`.tab[data-tab="${id}"]`)?.click();
@@ -508,12 +534,16 @@ async function cargarClientes(buscar) {
   const tbody = document.getElementById('tbody-clientes');
   tbody.innerHTML = '<tr><td colspan="6" class="cargando-msg">Cargando…</td></tr>';
   try {
-    const params = buscar ? `?buscar=${encodeURIComponent(buscar)}` : '';
-    const res  = await fetch(`/api/clientes${params}`);
+    const params = new URLSearchParams({ expediente: contextoExpediente });
+    if (buscar) params.set('buscar', buscar);
+    const res  = await fetch(`/api/clientes?${params.toString()}`);
     const rows = await res.json();
 
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="cargando-msg">No hay clientes registrados. Cree uno con "+ Nuevo Cliente".</td></tr>';
+      const vacio = contextoExpediente === 'proveedor'
+        ? 'No hay proveedores registrados. Cree uno con "+ Nuevo Proveedor".'
+        : 'No hay clientes registrados. Cree uno con "+ Nuevo Cliente".';
+      tbody.innerHTML = `<tr><td colspan="6" class="cargando-msg">${vacio}</td></tr>`;
       return;
     }
 
@@ -607,10 +637,11 @@ document.getElementById('form-nuevo-cliente').addEventListener('submit', async e
     actividadEconomica: (document.getElementById('nc-actividad') || {}).value?.trim() || '',
     origenFondos      : (document.getElementById('nc-origen-fondos') || {}).value?.trim() || '',
     representanteLegal: tipo === 'juridica' ? ((document.getElementById('nc-representante') || {}).value?.trim() || '') : '',
+    tipoExpediente    : contextoExpediente,
   };
 
   if (!body.nombre) {
-    mostrarError(err, 'El nombre del cliente es obligatorio.');
+    mostrarError(err, `El nombre del ${contextoExpediente} es obligatorio.`);
     return;
   }
 
@@ -687,6 +718,9 @@ async function abrirFichaCliente(id) {
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el cliente.');
 
     clienteEnFicha = data.cliente;
+    // Sincronizar contexto con el tipo de expediente del registro abierto
+    contextoExpediente = data.cliente.tipo_expediente === 'proveedor' ? 'proveedor' : 'cliente';
+    aplicarContextoExpediente();
     renderizarFicha(data.cliente, data.documentos, data.historial, data.beneficiarios || [], data.riesgoCalculado, data.pendientes || []);
     mostrarVistaFichaCliente();
   } catch (err) {
@@ -695,7 +729,18 @@ async function abrirFichaCliente(id) {
 }
 
 function renderizarFicha(cliente, documentos, historial, beneficiarios, riesgoCalculado, pendientes) {
-  document.getElementById('ficha-nombre').textContent = cliente.nombre;
+  // El h2 contiene un nodo de texto (nombre) + el badge de expediente. Solo actualizo el texto.
+  const fichaNombreEl = document.getElementById('ficha-nombre');
+  if (fichaNombreEl.childNodes[0]) fichaNombreEl.childNodes[0].nodeValue = `${cliente.nombre} `;
+
+  // Badge de tipo de expediente (cliente / proveedor)
+  const esProv = cliente.tipo_expediente === 'proveedor';
+  const badge = document.getElementById('ficha-expediente-badge');
+  if (badge) {
+    badge.textContent = esProv ? 'PROVEEDOR' : 'CLIENTE';
+    badge.className = `badge-expediente ${esProv ? 'badge-expediente--proveedor' : 'badge-expediente--cliente'}`;
+    badge.classList.remove('oculto');
+  }
   document.getElementById('ficha-cedula').textContent = cliente.cedula || '—';
   document.getElementById('ficha-tipo').textContent = cliente.tipo === 'juridica' ? 'Persona jurídica' : 'Persona natural';
   document.getElementById('ficha-nacionalidad').textContent = cliente.nacionalidad || '—';
@@ -1076,7 +1121,7 @@ async function cargarAlertas() {
               <div>
                 <span class="alerta-nombre">${esc(c.nombre)}</span>
                 <span class="badge-riesgo ${RIESGO_CLASES[rc.nivel] || 'badge-riesgo--pendiente'}" style="margin-left:10px">${RIESGO_LABELS[rc.nivel]}</span>
-                <span class="alerta-tipo">${c.tipo === 'juridica' ? 'Jurídica' : 'Natural'}</span>
+                <span class="alerta-tipo">${c.tipo === 'juridica' ? 'Jurídica' : 'Natural'}${c.tipoExpediente === 'proveedor' ? ' · 🏢 Proveedor' : ''}</span>
               </div>
               <div class="alerta-header-right">
                 ${estadoTxt ? `<span class="alerta-estado-txt">${estadoTxt}</span>` : ''}
@@ -1527,6 +1572,220 @@ document.querySelectorAll('.tab').forEach(btn => {
       cargarSelectClientesROS();
     });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COLABORADORES — Conozca a su Empleado (KYE), Decreto 35 de 2022
+// ═══════════════════════════════════════════════════════════════════════════
+const colabVistaLista = () => document.getElementById('colab-vista-lista');
+const colabVistaFicha = () => document.getElementById('colab-vista-ficha');
+
+async function cargarColaboradores(buscar) {
+  mostrarVistaListaColab();
+  const tbody = document.getElementById('tbody-colab');
+  tbody.innerHTML = '<tr><td colspan="8" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const params = buscar ? `?buscar=${encodeURIComponent(buscar)}` : '';
+    const res  = await fetch(`/api/empleados${params}`);
+    const rows = await res.json();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="cargando-msg">No hay colaboradores registrados. Cree uno con "+ Nuevo Colaborador".</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(e => {
+      const coincide = e.coincidencia
+        ? '<span class="resultado-alerta">⚠ Coincidencia</span>'
+        : '<span class="resultado-ok">✓ Limpio</span>';
+      return `
+        <tr class="${e.coincidencia ? 'es-alerta' : ''}">
+          <td>${esc(e.nombre)}</td>
+          <td>${esc(e.cedula || '—')}</td>
+          <td>${esc(e.cargo || '—')}</td>
+          <td>${esc(e.departamento || '—')}</td>
+          <td>${esc(e.fecha_ingreso || '—')}</td>
+          <td><span class="badge-riesgo ${RIESGO_CLASES[e.nivel_riesgo] || 'badge-riesgo--pendiente'}">${RIESGO_LABELS[e.nivel_riesgo] || e.nivel_riesgo}</span></td>
+          <td>${coincide}</td>
+          <td><button class="btn-secundario btn-chico btn-ver-colab" data-id="${e.id}">Ver ficha</button></td>
+        </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.btn-ver-colab').forEach(btn =>
+      btn.addEventListener('click', () => abrirFichaColab(btn.dataset.id)));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+function mostrarVistaListaColab() {
+  colabVistaLista().classList.remove('oculto');
+  colabVistaFicha().classList.add('oculto');
+}
+function mostrarVistaFichaColab() {
+  colabVistaLista().classList.add('oculto');
+  colabVistaFicha().classList.remove('oculto');
+}
+
+let debounceBuscarColab = null;
+document.getElementById('buscar-colab').addEventListener('input', e => {
+  clearTimeout(debounceBuscarColab);
+  debounceBuscarColab = setTimeout(() => cargarColaboradores(e.target.value.trim()), 250);
+});
+
+document.getElementById('btn-nuevo-colab').addEventListener('click', () => {
+  document.getElementById('form-nuevo-colab-tarjeta').classList.remove('oculto');
+});
+document.getElementById('btn-cancelar-nuevo-colab').addEventListener('click', () => {
+  document.getElementById('form-nuevo-colab-tarjeta').classList.add('oculto');
+  document.getElementById('form-nuevo-colab').reset();
+  document.getElementById('colab-resultado-busqueda').classList.add('oculto');
+});
+
+document.getElementById('form-nuevo-colab').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err   = document.getElementById('error-nuevo-colab');
+  const resDiv = document.getElementById('colab-resultado-busqueda');
+  const btn   = document.getElementById('btn-crear-colab');
+  const txt   = btn.querySelector('.btn-texto');
+  err.classList.add('oculto');
+  resDiv.classList.add('oculto');
+
+  const body = {
+    nombre        : document.getElementById('col-nombre').value.trim(),
+    cedula        : document.getElementById('col-cedula').value.trim(),
+    cargo         : document.getElementById('col-cargo').value.trim(),
+    departamento  : document.getElementById('col-departamento').value.trim(),
+    fechaIngreso  : document.getElementById('col-fecha-ingreso').value,
+    tipoContrato  : document.getElementById('col-tipo-contrato').value,
+    salarioRango  : document.getElementById('col-salario').value.trim(),
+    declaracionPep: document.getElementById('col-declaracion-pep').value,
+    esPep         : document.getElementById('col-es-pep').checked ? 1 : 0,
+    accesoSensible: document.getElementById('col-acceso-sensible').checked ? 1 : 0,
+    notas         : document.getElementById('col-notas').value.trim(),
+    usuario       : usuarioActual,
+  };
+  if (!body.nombre) { mostrarError(err, 'El nombre del colaborador es obligatorio.'); return; }
+
+  btn.disabled = true;
+  if (txt) txt.textContent = 'Verificando en listas AML…';
+  try {
+    const res  = await fetch('/api/empleados', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al crear el colaborador.');
+
+    document.getElementById('form-nuevo-colab').reset();
+    const hay = data.coincidencia;
+    resDiv.className = hay ? 'veredicto-banner coincidencia' : 'veredicto-banner sin-coincidencia';
+    resDiv.innerHTML = hay
+      ? `<span>⚠</span> <span><strong>${esc(data.nombre)}</strong> — COINCIDENCIA en listas AML/PEP. Requiere análisis del Oficial.</span>`
+      : `<span>✓</span> <span><strong>${esc(data.nombre)}</strong> — Sin coincidencias en ONU, OFAC, UE ni PEP.</span>`;
+    resDiv.classList.remove('oculto');
+    document.getElementById('form-nuevo-colab-tarjeta').classList.add('oculto');
+    cargarColaboradores();
+  } catch (e2) {
+    mostrarError(err, e2.message);
+  } finally {
+    btn.disabled = false;
+    if (txt) txt.textContent = 'Crear y Verificar en Listas AML';
+  }
+});
+
+async function abrirFichaColab(id) {
+  try {
+    const res  = await fetch(`/api/empleados/${id}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo cargar el colaborador.');
+    colabEnFicha = data.empleado;
+    renderizarFichaColab(data.empleado, data.pendientes || []);
+    mostrarVistaFichaColab();
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
+function renderizarFichaColab(e, pendientes) {
+  document.getElementById('colab-ficha-nombre').textContent = e.nombre;
+  document.getElementById('colab-ficha-cedula').textContent = e.cedula || '—';
+  document.getElementById('colab-ficha-cargo').textContent = e.cargo || '—';
+  document.getElementById('colab-ficha-departamento').textContent = e.departamento || '—';
+  document.getElementById('colab-ficha-ingreso').textContent = e.fecha_ingreso || '—';
+  document.getElementById('colab-ficha-contrato').textContent = e.tipo_contrato || '—';
+  document.getElementById('colab-ficha-pep').textContent = e.declaracion_pep || (e.es_pep ? 'Marcado como PEP' : '—');
+  document.getElementById('colab-ficha-revision').textContent = e.fecha_revision || 'Sin tamizar';
+  document.getElementById('colab-ficha-listas').textContent = e.resultado_listas || '—';
+
+  const riesgoEl = document.getElementById('colab-ficha-riesgo');
+  riesgoEl.textContent = RIESGO_LABELS[e.nivel_riesgo] || e.nivel_riesgo;
+  riesgoEl.className = `badge-riesgo ${RIESGO_CLASES[e.nivel_riesgo] || 'badge-riesgo--pendiente'}`;
+
+  const coincEl = document.getElementById('colab-ficha-coincidencia');
+  if (e.coincidencia) {
+    coincEl.className = 'veredicto-banner coincidencia';
+    coincEl.innerHTML = '<span>⚠</span> <span>COINCIDENCIA en listas de sanciones / PEP — el Oficial de Cumplimiento debe analizar y documentar la decisión.</span>';
+    coincEl.classList.remove('oculto');
+  } else {
+    coincEl.classList.add('oculto');
+  }
+
+  const listEl = document.getElementById('colab-pendientes-lista');
+  if (!pendientes.length) {
+    listEl.innerHTML = '<p class="pendientes-ok">✓ Expediente KYE completo</p>';
+  } else {
+    listEl.innerHTML = `<div class="pendientes-titulo">Pendientes (${pendientes.length})</div>` +
+      pendientes.map(p => `<div class="pendiente-item pendiente-${p.tipo}"><span class="pendiente-icono">${PENDIENTE_ICONOS[p.tipo] || '•'}</span><span>${esc(p.msg)}</span></div>`).join('');
+  }
+  document.getElementById('form-editar-colab').classList.add('oculto');
+}
+
+document.getElementById('btn-volver-colab').addEventListener('click', () => cargarColaboradores());
+
+document.getElementById('btn-editar-colab').addEventListener('click', () => {
+  if (!colabEnFicha) return;
+  const e = colabEnFicha;
+  document.getElementById('ecol-nombre').value = e.nombre || '';
+  document.getElementById('ecol-cedula').value = e.cedula || '';
+  document.getElementById('ecol-cargo').value = e.cargo || '';
+  document.getElementById('ecol-departamento').value = e.departamento || '';
+  document.getElementById('ecol-fecha-ingreso').value = e.fecha_ingreso || '';
+  document.getElementById('ecol-fecha-salida').value = e.fecha_salida || '';
+  document.getElementById('ecol-nivel-riesgo').value = e.nivel_riesgo || 'pendiente';
+  document.getElementById('ecol-declaracion-pep').value = e.declaracion_pep || '';
+  document.getElementById('ecol-notas').value = e.notas || '';
+  document.getElementById('form-editar-colab').classList.remove('oculto');
+});
+document.getElementById('btn-cancelar-editar-colab').addEventListener('click', () => {
+  document.getElementById('form-editar-colab').classList.add('oculto');
+});
+
+document.getElementById('form-editar-colab').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  if (!colabEnFicha) return;
+  const body = {
+    nombre        : document.getElementById('ecol-nombre').value.trim(),
+    cedula        : document.getElementById('ecol-cedula').value.trim(),
+    cargo         : document.getElementById('ecol-cargo').value.trim(),
+    departamento  : document.getElementById('ecol-departamento').value.trim(),
+    fechaIngreso  : document.getElementById('ecol-fecha-ingreso').value,
+    fechaSalida   : document.getElementById('ecol-fecha-salida').value,
+    nivelRiesgo   : document.getElementById('ecol-nivel-riesgo').value,
+    declaracionPep: document.getElementById('ecol-declaracion-pep').value,
+    notas         : document.getElementById('ecol-notas').value.trim(),
+  };
+  try {
+    const res  = await fetch(`/api/empleados/${colabEnFicha.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar.');
+    abrirFichaColab(colabEnFicha.id);
+  } catch (err) { alert(`Error: ${err.message}`); }
+});
+
+document.getElementById('btn-retamizar-colab').addEventListener('click', async () => {
+  if (!colabEnFicha) return;
+  if (!confirm('¿Volver a tamizar a este colaborador en las listas de sanciones?')) return;
+  try {
+    const res  = await fetch(`/api/empleados/${colabEnFicha.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retamizar: true }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al re-tamizar.');
+    abrirFichaColab(colabEnFicha.id);
+  } catch (err) { alert(`Error: ${err.message}`); }
 });
 
 // ── Utilidades ────────────────────────────────────────────

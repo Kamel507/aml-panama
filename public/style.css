@@ -1029,3 +1029,27 @@ body {
 /* ── Pendientes — aprobacion y conservacion ─────────────── */
 .pendiente-aprobacion { background: #FFF0F0; border-left: 3px solid var(--rojo); }
 .pendiente-conservacion { background: #F0FFF4; border-left: 3px solid var(--verde); }
+/* ── Badges de tipo de expediente (cliente / proveedor) ──── */
+.badge-expediente {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  vertical-align: middle;
+}
+.badge-expediente--cliente   { background: var(--azul-bg); color: var(--azul); border: 1px solid var(--azul-claro); }
+.badge-expediente--proveedor { background: #FFF3E0; color: #A85700; border: 1px solid #F9A825; }
+
+/* ── Checkbox en formularios (KYE) ───────────────────────── */
+.campo-check { display: flex; align-items: center; }
+.campo-check label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  font-size: 0.88rem;
+  cursor: pointer;
+  color: var(--texto);
+}
+.campo-check input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }

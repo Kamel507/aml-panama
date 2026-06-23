@@ -30,7 +30,9 @@
   <!-- ── Navegación por pestañas ── -->
   <nav class="tabs">
     <button class="tab activo" data-tab="consulta">🔍 Nueva Consulta</button>
-    <button class="tab" data-tab="clientes">👤 Clientes</button>
+    <button class="tab" data-tab="clientes" data-expediente="cliente">👤 Clientes</button>
+    <button class="tab" data-tab="clientes" data-expediente="proveedor">🏢 Proveedores</button>
+    <button class="tab" data-tab="colaboradores">👷 Colaboradores</button>
     <button class="tab" data-tab="historial">📋 Historial</button>
     <button class="tab" data-tab="alertas">⚠ Alertas</button>
     <button class="tab" data-tab="ros">📋 ROS</button>
@@ -226,10 +228,10 @@
       <div id="clientes-vista-lista">
         <div class="tarjeta">
           <div class="historial-header">
-            <h2>Expedientes de Clientes</h2>
+            <h2 id="clientes-titulo-lista">Expedientes de Clientes</h2>
             <button id="btn-nuevo-cliente" class="btn-primario btn-chico">+ Nuevo Cliente</button>
           </div>
-          <p class="subtitulo">Cree fichas de clientes, suba sus documentos y consulte su historial AML.</p>
+          <p class="subtitulo" id="clientes-subtitulo-lista">Cree fichas de clientes, suba sus documentos y consulte su historial AML.</p>
 
           <div class="campo campo-buscar">
             <input type="text" id="buscar-cliente" placeholder="Buscar por nombre o cédula…" autocomplete="off" />
@@ -256,7 +258,7 @@
 
         <!-- Formulario nuevo cliente -->
         <div id="form-nuevo-cliente-tarjeta" class="tarjeta oculto">
-          <h2>Nuevo Cliente</h2>
+          <h2 id="nc-form-titulo">Nuevo Cliente</h2>
           <form id="form-nuevo-cliente">
             <div class="campos-fila">
               <div class="campo">
@@ -346,11 +348,11 @@
 
       <!-- Vista: ficha de cliente -->
       <div id="clientes-vista-ficha" class="oculto">
-        <button id="btn-volver-clientes" class="btn-secundario btn-volver">← Volver a la lista de clientes</button>
+        <button id="btn-volver-clientes" class="btn-secundario btn-volver">← Volver a la lista</button>
 
         <div class="tarjeta ficha-cliente-tarjeta">
           <div class="historial-header">
-            <h2 id="ficha-nombre">—</h2>
+            <h2 id="ficha-nombre">— <span id="ficha-expediente-badge" class="badge-expediente oculto"></span></h2>
             <button id="btn-buscar-aml-cliente" class="btn-primario btn-chico">🔍 Buscar AML de este cliente</button>
           </div>
 
@@ -658,6 +660,202 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: COLABORADORES (KYE — Decreto 35 de 2022)
+    ══════════════════════════════════════════════ -->
+    <section id="tab-colaboradores" class="panel">
+
+      <!-- Vista: lista de colaboradores -->
+      <div id="colab-vista-lista">
+        <div class="tarjeta">
+          <div class="historial-header">
+            <h2>Conozca a su Empleado (KYE)</h2>
+            <button id="btn-nuevo-colab" class="btn-primario btn-chico">+ Nuevo Colaborador</button>
+          </div>
+          <p class="subtitulo">Política de conocimiento del empleado (Decreto Ejecutivo 35 de 2022). Cada colaborador se tamiza en listas de sanciones y PEP, y se le asigna un nivel de riesgo.</p>
+
+          <div class="campo campo-buscar">
+            <input type="text" id="buscar-colab" placeholder="Buscar por nombre, cédula o cargo…" autocomplete="off" />
+          </div>
+
+          <div id="tabla-colab-contenedor">
+            <table class="tabla-historial" id="tabla-colab">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Cédula</th>
+                  <th>Cargo</th>
+                  <th>Departamento</th>
+                  <th>Ingreso</th>
+                  <th>Riesgo</th>
+                  <th>Listas</th>
+                  <th>Ficha</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-colab">
+                <tr><td colspan="8" class="cargando-msg">Cargando colaboradores…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Formulario nuevo colaborador -->
+        <div id="form-nuevo-colab-tarjeta" class="tarjeta oculto">
+          <h2>Nuevo Colaborador</h2>
+          <form id="form-nuevo-colab">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="col-nombre">Nombre completo</label>
+                <input type="text" id="col-nombre" required maxlength="200" />
+              </div>
+              <div class="campo">
+                <label for="col-cedula">Cédula / Identificación</label>
+                <input type="text" id="col-cedula" maxlength="50" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="col-cargo">Cargo / Posición</label>
+                <input type="text" id="col-cargo" maxlength="120" />
+              </div>
+              <div class="campo">
+                <label for="col-departamento">Departamento / Área</label>
+                <input type="text" id="col-departamento" maxlength="120" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="col-fecha-ingreso">Fecha de ingreso</label>
+                <input type="date" id="col-fecha-ingreso" />
+              </div>
+              <div class="campo">
+                <label for="col-tipo-contrato">Tipo de contrato</label>
+                <select id="col-tipo-contrato">
+                  <option value="">— Seleccione —</option>
+                  <option value="permanente">Permanente</option>
+                  <option value="temporal">Temporal</option>
+                  <option value="servicios">Servicios profesionales</option>
+                  <option value="practica">Práctica / pasantía</option>
+                </select>
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="col-salario">Rango salarial (opcional)</label>
+                <input type="text" id="col-salario" maxlength="60" placeholder="Ej: B/.600–1,000" />
+              </div>
+              <div class="campo">
+                <label for="col-declaracion-pep">Declaración PEP del empleado</label>
+                <select id="col-declaracion-pep">
+                  <option value="">— Seleccione —</option>
+                  <option value="No es PEP">Declaró NO ser PEP</option>
+                  <option value="Es PEP">Declaró SER PEP</option>
+                  <option value="Vinculado a PEP">Vinculado/pariente de PEP</option>
+                </select>
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo campo-check">
+                <label><input type="checkbox" id="col-es-pep" /> Marcar como PEP (riesgo alto)</label>
+              </div>
+              <div class="campo campo-check">
+                <label><input type="checkbox" id="col-acceso-sensible" /> Acceso a áreas/información sensible (caja, cumplimiento, sistemas)</label>
+              </div>
+            </div>
+            <div class="campo" style="margin-bottom:14px">
+              <label for="col-notas">Notas</label>
+              <input type="text" id="col-notas" maxlength="400" />
+            </div>
+            <div id="error-nuevo-colab" class="mensaje-error oculto"></div>
+            <div id="colab-resultado-busqueda" class="veredicto-banner oculto" style="margin-bottom:14px"></div>
+            <div class="acciones-formulario">
+              <button type="submit" id="btn-crear-colab" class="btn-primario"><span class="btn-texto">Crear y Verificar en Listas AML</span></button>
+              <button type="button" id="btn-cancelar-nuevo-colab" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Vista: ficha de colaborador -->
+      <div id="colab-vista-ficha" class="oculto">
+        <button id="btn-volver-colab" class="btn-secundario btn-volver">← Volver a la lista de colaboradores</button>
+
+        <div class="tarjeta ficha-cliente-tarjeta">
+          <div class="historial-header">
+            <h2 id="colab-ficha-nombre">—</h2>
+            <span id="colab-ficha-riesgo" class="badge-riesgo badge-riesgo--pendiente">Pendiente</span>
+          </div>
+          <div class="meta-grid ficha-meta">
+            <div><strong>Cédula:</strong> <span id="colab-ficha-cedula">—</span></div>
+            <div><strong>Cargo:</strong> <span id="colab-ficha-cargo">—</span></div>
+            <div><strong>Departamento:</strong> <span id="colab-ficha-departamento">—</span></div>
+            <div><strong>Ingreso:</strong> <span id="colab-ficha-ingreso">—</span></div>
+            <div><strong>Tipo de contrato:</strong> <span id="colab-ficha-contrato">—</span></div>
+            <div><strong>Declaración PEP:</strong> <span id="colab-ficha-pep">—</span></div>
+            <div><strong>Último tamizaje:</strong> <span id="colab-ficha-revision">—</span></div>
+            <div><strong>Resultado listas:</strong> <span id="colab-ficha-listas">—</span></div>
+          </div>
+          <div id="colab-ficha-coincidencia" class="oculto"></div>
+        </div>
+
+        <!-- Pendientes KYE -->
+        <div class="tarjeta">
+          <h2>Estado del expediente del empleado</h2>
+          <div id="colab-pendientes-lista"></div>
+        </div>
+
+        <!-- Editar colaborador -->
+        <div class="tarjeta">
+          <div class="historial-header">
+            <h2>Datos y nivel de riesgo</h2>
+            <div style="display:flex;gap:8px">
+              <button id="btn-retamizar-colab" class="btn-secundario btn-chico">🔄 Re-tamizar en listas</button>
+              <button id="btn-editar-colab" class="btn-secundario btn-chico">✎ Editar</button>
+            </div>
+          </div>
+          <form id="form-editar-colab" class="oculto">
+            <div class="campos-fila">
+              <div class="campo"><label>Nombre</label><input type="text" id="ecol-nombre" /></div>
+              <div class="campo"><label>Cédula</label><input type="text" id="ecol-cedula" /></div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo"><label>Cargo</label><input type="text" id="ecol-cargo" /></div>
+              <div class="campo"><label>Departamento</label><input type="text" id="ecol-departamento" /></div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo"><label>Fecha de ingreso</label><input type="date" id="ecol-fecha-ingreso" /></div>
+              <div class="campo"><label>Fecha de salida (si aplica)</label><input type="date" id="ecol-fecha-salida" /></div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label>Nivel de riesgo (confirmar)</label>
+                <select id="ecol-nivel-riesgo">
+                  <option value="pendiente">Pendiente</option>
+                  <option value="bajo">Bajo</option>
+                  <option value="medio">Medio</option>
+                  <option value="alto">Alto</option>
+                </select>
+              </div>
+              <div class="campo"><label>Declaración PEP</label>
+                <select id="ecol-declaracion-pep">
+                  <option value="">—</option>
+                  <option value="No es PEP">Declaró NO ser PEP</option>
+                  <option value="Es PEP">Declaró SER PEP</option>
+                  <option value="Vinculado a PEP">Vinculado/pariente de PEP</option>
+                </select>
+              </div>
+            </div>
+            <div class="campo" style="margin-bottom:14px"><label>Notas</label><input type="text" id="ecol-notas" /></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario btn-chico">Guardar</button>
+              <button type="button" id="btn-cancelar-editar-colab" class="btn-secundario btn-chico">Cancelar</button>
+            </div>
+          </form>
         </div>
       </div>
 

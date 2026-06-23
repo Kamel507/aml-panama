@@ -183,6 +183,35 @@ async function initDB() {
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_fecha TEXT");
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_por TEXT");
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_notas TEXT");
+  // Discriminador cliente / proveedor: el mismo expediente de debida diligencia
+  // aplica a proveedores (Decreto Ejecutivo 35 de 2022). 'cliente' por defecto
+  // para no afectar los registros existentes.
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN tipo_expediente TEXT DEFAULT 'cliente'");
+
+  // Conozca a su empleado (KYE) — Decreto Ejecutivo 35 de 2022
+  db.run(`
+    CREATE TABLE IF NOT EXISTS empleados (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre           TEXT NOT NULL,
+      cedula           TEXT,
+      cargo            TEXT,
+      departamento     TEXT,
+      fecha_ingreso    TEXT,
+      fecha_salida     TEXT,
+      tipo_contrato    TEXT,
+      salario_rango    TEXT,
+      es_pep           INTEGER DEFAULT 0,
+      declaracion_pep  TEXT,
+      acceso_sensible  INTEGER DEFAULT 0,
+      nivel_riesgo     TEXT DEFAULT 'pendiente',
+      resultado_listas TEXT,
+      coincidencia     INTEGER DEFAULT 0,
+      fecha_revision   TEXT,
+      notas            TEXT,
+      creado_por       TEXT,
+      creado_en        TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS reportes_sospechosos (
@@ -1191,12 +1220,17 @@ function calcularPendientes(cliente, documentos, beneficiarios, riesgo) {
 // ─── API: Expedientes de clientes ──────────────────────────────────────────────
 app.get('/api/clientes', (req, res) => {
   const q = (req.query.buscar || '').trim();
+  // Filtro por tipo de expediente. Los registros antiguos (NULL) se tratan como 'cliente'.
+  const expediente = req.query.expediente === 'proveedor' ? 'proveedor' : 'cliente';
+  const expWhere = expediente === 'proveedor'
+    ? "tipo_expediente = 'proveedor'"
+    : "(tipo_expediente = 'cliente' OR tipo_expediente IS NULL)";
   let rows;
   if (q) {
     const like = `%${q}%`;
-    rows = dbAll('SELECT * FROM clientes WHERE nombre LIKE ? OR cedula LIKE ? ORDER BY nombre', [like, like]);
+    rows = dbAll(`SELECT * FROM clientes WHERE ${expWhere} AND (nombre LIKE ? OR cedula LIKE ?) ORDER BY nombre`, [like, like]);
   } else {
-    rows = dbAll('SELECT * FROM clientes ORDER BY nombre');
+    rows = dbAll(`SELECT * FROM clientes WHERE ${expWhere} ORDER BY nombre`);
   }
   res.json(rows);
 });
@@ -1229,19 +1263,20 @@ app.get('/api/clientes/:id', (req, res) => {
 
 app.post('/api/clientes', (req, res) => {
   const { nombre, cedula, tipo, nacionalidad, fechaNacimiento, notas, usuario,
-          direccion, representanteLegal, actividadEconomica, origenFondos } = req.body;
+          direccion, representanteLegal, actividadEconomica, origenFondos, tipoExpediente } = req.body;
   const nombreT = (nombre || '').trim();
-  if (!nombreT) return res.status(400).json({ error: 'El nombre del cliente es obligatorio.' });
+  if (!nombreT) return res.status(400).json({ error: 'El nombre es obligatorio.' });
 
-  const tipoT   = tipo === 'juridica' ? 'juridica' : 'natural';
+  const tipoT       = tipo === 'juridica' ? 'juridica' : 'natural';
+  const expedienteT = tipoExpediente === 'proveedor' ? 'proveedor' : 'cliente';
   const carpeta = generarCarpetaUnica(nombreT);
   fs.mkdirSync(path.join(clientesDir, carpeta), { recursive: true });
 
   const id = dbInsert(
     `INSERT INTO clientes
        (nombre, cedula, tipo, nacionalidad, fecha_nacimiento, notas, carpeta, creado_por,
-        direccion, representante_legal, actividad_economica, origen_fondos)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        direccion, representante_legal, actividad_economica, origen_fondos, tipo_expediente)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       nombreT,
       (cedula || '').trim() || null,
@@ -1255,6 +1290,7 @@ app.post('/api/clientes', (req, res) => {
       (representanteLegal || '').trim() || null,
       (actividadEconomica || '').trim() || null,
       (origenFondos || '').trim() || null,
+      expedienteT,
     ]
   );
   res.json(dbGet('SELECT * FROM clientes WHERE id = ?', [id]));
@@ -1800,7 +1836,7 @@ app.get('/api/alertas', (_req, res) => {
     const beneficiarios = dbAll('SELECT coincidencia FROM beneficiarios_finales WHERE cliente_id = ?', [c.id]);
     const riesgo        = calcularRiesgoCliente(c, historial, beneficiarios);
     const pendientes    = calcularPendientes(c, documentos, beneficiarios, riesgo);
-    return { id: c.id, nombre: c.nombre, tipo: c.tipo, riesgoCalculado: riesgo, pendientes };
+    return { id: c.id, nombre: c.nombre, tipo: c.tipo, tipoExpediente: c.tipo_expediente || 'cliente', riesgoCalculado: riesgo, pendientes };
   });
 
   resultado.sort((a, b) => {
@@ -1809,6 +1845,151 @@ app.get('/api/alertas', (_req, res) => {
   });
 
   res.json(resultado);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CONOZCA A SU EMPLEADO (KYE) — Decreto Ejecutivo 35 de 2022, Ley 23 de 2015
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Tamiza un empleado contra todas las listas y devuelve el resumen + coincidencia.
+async function tamizarPersona(nombre, cedula) {
+  const nombreT = (nombre || '').trim();
+  const cedulaT = (cedula || '').trim();
+  let onuHits = [], ofacHits = [], ueHits = [], pepHits = [];
+  const errores = [];
+  try { const l = await fetchUNList();   onuHits  = buscarEnLista(l.entries, { nombre: nombreT, cedula: cedulaT }); } catch (e) { errores.push(`ONU: ${e.message}`); }
+  try { const l = await fetchOFACList(); ofacHits = buscarEnLista(l.entries, { nombre: nombreT, cedula: cedulaT }); } catch (e) { errores.push(`OFAC: ${e.message}`); }
+  try { const l = await fetchEUList();   ueHits   = buscarEnLista(l.entries, { nombre: nombreT, cedula: cedulaT }); } catch (e) { errores.push(`UE: ${e.message}`); }
+  try { pepHits = buscarEnLista(pepEntries(), { nombre: nombreT, cedula: cedulaT }); } catch (e) { errores.push(`PEP: ${e.message}`); }
+  const hayCoincidencia = onuHits.length + ofacHits.length + ueHits.length + pepHits.length > 0;
+  const t = (n) => (n > 0 ? `${n} coincidencia(s)` : 'Sin coincidencias');
+  const resumen = `ONU: ${t(onuHits.length)} | OFAC: ${t(ofacHits.length)} | UE: ${t(ueHits.length)} | PEP: ${t(pepHits.length)}`;
+  return { hayCoincidencia, resumen, pepHits, errores };
+}
+
+app.get('/api/empleados', (req, res) => {
+  const q = (req.query.buscar || '').trim();
+  let rows;
+  if (q) {
+    const like = `%${q}%`;
+    rows = dbAll('SELECT * FROM empleados WHERE nombre LIKE ? OR cedula LIKE ? OR cargo LIKE ? ORDER BY nombre', [like, like, like]);
+  } else {
+    rows = dbAll('SELECT * FROM empleados ORDER BY nombre');
+  }
+  res.json(rows);
+});
+
+app.get('/api/empleados/:id', (req, res) => {
+  const empleado = dbGet('SELECT * FROM empleados WHERE id = ?', [req.params.id]);
+  if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado.' });
+  // Pendientes KYE: campos mínimos del Decreto 35
+  const pendientes = [];
+  if (!empleado.cedula)        pendientes.push({ tipo: 'campo', msg: 'Falta cédula / identificación del empleado.' });
+  if (!empleado.cargo)         pendientes.push({ tipo: 'campo', msg: 'Falta cargo / posición.' });
+  if (!empleado.fecha_ingreso) pendientes.push({ tipo: 'campo', msg: 'Falta fecha de ingreso.' });
+  if (!empleado.declaracion_pep) pendientes.push({ tipo: 'campo', msg: 'Falta declaración PEP del empleado.' });
+  if (!empleado.fecha_revision)  pendientes.push({ tipo: 'revision', msg: 'Empleado aún no tamizado en listas de sanciones.' });
+  if (empleado.coincidencia)     pendientes.push({ tipo: 'revision', msg: '⚠ Coincidencia en listas — requiere análisis del Oficial de Cumplimiento.' });
+  if (empleado.nivel_riesgo === 'pendiente') pendientes.push({ tipo: 'campo', msg: 'Falta confirmar nivel de riesgo del empleado.' });
+  res.json({ empleado, pendientes });
+});
+
+app.post('/api/empleados', async (req, res) => {
+  const { nombre, cedula, cargo, departamento, fechaIngreso, tipoContrato, salarioRango,
+          esPep, declaracionPep, accesoSensible, notas, usuario } = req.body;
+  const nombreT = (nombre || '').trim();
+  if (!nombreT) return res.status(400).json({ error: 'El nombre del empleado es obligatorio.' });
+
+  const { fecha, hora } = ahoraPA();
+  const tam = await tamizarPersona(nombreT, cedula);
+  // Riesgo automático del empleado: coincidencia o PEP o acceso a áreas sensibles → alto
+  let nivel = 'bajo';
+  if (tam.hayCoincidencia || tam.pepHits.length > 0 || String(esPep) === '1' || esPep === true) nivel = 'alto';
+  else if (String(accesoSensible) === '1' || accesoSensible === true) nivel = 'medio';
+
+  const id = dbInsert(
+    `INSERT INTO empleados
+       (nombre, cedula, cargo, departamento, fecha_ingreso, tipo_contrato, salario_rango,
+        es_pep, declaracion_pep, acceso_sensible, nivel_riesgo, resultado_listas, coincidencia,
+        fecha_revision, notas, creado_por)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      nombreT,
+      (cedula || '').trim() || null,
+      (cargo || '').trim() || null,
+      (departamento || '').trim() || null,
+      (fechaIngreso || '').trim() || null,
+      (tipoContrato || '').trim() || null,
+      (salarioRango || '').trim() || null,
+      (String(esPep) === '1' || esPep === true) ? 1 : 0,
+      (declaracionPep || '').trim() || null,
+      (String(accesoSensible) === '1' || accesoSensible === true) ? 1 : 0,
+      nivel,
+      tam.resumen,
+      tam.hayCoincidencia ? 1 : 0,
+      `${fecha} ${hora}`,
+      (notas || '').trim() || null,
+      (usuario || '').trim() || null,
+    ]
+  );
+  res.json({ ...dbGet('SELECT * FROM empleados WHERE id = ?', [id]), coincidencia: tam.hayCoincidencia ? 1 : 0, errores: tam.errores });
+});
+
+app.put('/api/empleados/:id', async (req, res) => {
+  const empleado = dbGet('SELECT * FROM empleados WHERE id = ?', [req.params.id]);
+  if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado.' });
+
+  const { nombre, cedula, cargo, departamento, fechaIngreso, fechaSalida, tipoContrato,
+          salarioRango, esPep, declaracionPep, accesoSensible, nivelRiesgo, notas, retamizar } = req.body;
+
+  let resultado = empleado.resultado_listas;
+  let coincidencia = empleado.coincidencia;
+  let fechaRevision = empleado.fecha_revision;
+  // Re-tamizar si se pide explícitamente o si cambió el nombre/cédula
+  const nombreNuevo = nombre !== undefined ? (nombre || '').trim() : empleado.nombre;
+  const cedulaNueva = cedula !== undefined ? (cedula || '').trim() : empleado.cedula;
+  if (retamizar || nombreNuevo !== empleado.nombre || cedulaNueva !== (empleado.cedula || '')) {
+    const tam = await tamizarPersona(nombreNuevo, cedulaNueva);
+    resultado = tam.resumen;
+    coincidencia = tam.hayCoincidencia ? 1 : 0;
+    const { fecha, hora } = ahoraPA();
+    fechaRevision = `${fecha} ${hora}`;
+  }
+
+  dbExec(
+    `UPDATE empleados
+     SET nombre = ?, cedula = ?, cargo = ?, departamento = ?, fecha_ingreso = ?, fecha_salida = ?,
+         tipo_contrato = ?, salario_rango = ?, es_pep = ?, declaracion_pep = ?, acceso_sensible = ?,
+         nivel_riesgo = ?, resultado_listas = ?, coincidencia = ?, fecha_revision = ?, notas = ?
+     WHERE id = ?`,
+    [
+      nombreNuevo || empleado.nombre,
+      cedulaNueva || null,
+      cargo !== undefined ? (cargo || '').trim() || null : empleado.cargo,
+      departamento !== undefined ? (departamento || '').trim() || null : empleado.departamento,
+      fechaIngreso !== undefined ? (fechaIngreso || '').trim() || null : empleado.fecha_ingreso,
+      fechaSalida !== undefined ? (fechaSalida || '').trim() || null : empleado.fecha_salida,
+      tipoContrato !== undefined ? (tipoContrato || '').trim() || null : empleado.tipo_contrato,
+      salarioRango !== undefined ? (salarioRango || '').trim() || null : empleado.salario_rango,
+      esPep !== undefined ? ((String(esPep) === '1' || esPep === true) ? 1 : 0) : empleado.es_pep,
+      declaracionPep !== undefined ? (declaracionPep || '').trim() || null : empleado.declaracion_pep,
+      accesoSensible !== undefined ? ((String(accesoSensible) === '1' || accesoSensible === true) ? 1 : 0) : empleado.acceso_sensible,
+      nivelRiesgo !== undefined ? nivelRiesgo : empleado.nivel_riesgo,
+      resultado,
+      coincidencia,
+      fechaRevision,
+      notas !== undefined ? (notas || '').trim() || null : empleado.notas,
+      empleado.id,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM empleados WHERE id = ?', [empleado.id]));
+});
+
+app.delete('/api/empleados/:id', (req, res) => {
+  const empleado = dbGet('SELECT * FROM empleados WHERE id = ?', [req.params.id]);
+  if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado.' });
+  dbExec('DELETE FROM empleados WHERE id = ?', [empleado.id]);
+  res.json({ ok: true });
 });
 
 // ─── Manejo de errores (multer / destinos inválidos) ──────────────────────────
