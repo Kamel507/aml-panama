@@ -383,6 +383,67 @@
           </div>
         </div>
 
+        <!-- Beneficiarios Finales — Art. 26-A y 28, Ley 23 de 2015 (solo jurídicas) -->
+        <div class="tarjeta" id="card-beneficiarios">
+          <h2>Beneficiarios Finales (Socios/Accionistas) <small class="subtitulo-legal">Art. 26-A y 28, Ley 23 de 2015</small></h2>
+          <p class="subtitulo">Registro e identificación de beneficiarios finales con participación accionaria. Obligatorio para personas jurídicas conforme a la Ley 23 de 2015.</p>
+
+          <form id="form-nuevo-beneficiario">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="bf-nombre">Nombre completo</label>
+                <input type="text" id="bf-nombre" required maxlength="200" placeholder="Ej: Juan Carlos López Pérez" autocomplete="off" />
+              </div>
+              <div class="campo">
+                <label for="bf-cedula">Cédula / Pasaporte</label>
+                <input type="text" id="bf-cedula" maxlength="50" placeholder="Ej: 8-123-4567" autocomplete="off" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="bf-nacionalidad">Nacionalidad</label>
+                <input type="text" id="bf-nacionalidad" maxlength="80" placeholder="Ej: Panameña" autocomplete="off" />
+              </div>
+              <div class="campo">
+                <label for="bf-participacion">% de participación</label>
+                <input type="number" id="bf-participacion" min="0" max="100" step="0.01" placeholder="Ej: 25.00" />
+              </div>
+              <div class="campo">
+                <label for="bf-cargo">Cargo / Rol</label>
+                <input type="text" id="bf-cargo" maxlength="150" placeholder="Ej: Accionista, Director" autocomplete="off" />
+              </div>
+            </div>
+            <div id="error-beneficiario" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" id="btn-agregar-bf" class="btn-primario btn-chico">
+                <span class="btn-icon">🔍</span>
+                <span class="btn-texto">Agregar y Verificar en Listas AML</span>
+              </button>
+            </div>
+          </form>
+
+          <div id="bf-resultado-busqueda" class="oculto"></div>
+
+          <div class="tabla-scroll" style="margin-top:1rem">
+            <table class="tabla-historial">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Cédula/Pasaporte</th>
+                  <th>Nacionalidad</th>
+                  <th>% Part.</th>
+                  <th>Cargo</th>
+                  <th>Verificación AML</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tbody-beneficiarios">
+                <tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Historial AML del cliente -->
         <div class="tarjeta">
           <h2>Historial de Búsquedas AML de este Cliente</h2>

@@ -604,6 +604,14 @@ function renderizarFicha(cliente, documentos, historial) {
 
   document.getElementById('form-editar-cliente').classList.add('oculto');
 
+  const cardBf = document.getElementById('card-beneficiarios');
+  if (cliente.tipo === 'juridica') {
+    cardBf.classList.remove('oculto');
+    cargarBeneficiarios(cliente.id);
+  } else {
+    cardBf.classList.add('oculto');
+  }
+
   renderizarDocumentos(cliente.id, documentos);
   renderizarHistorialCliente(historial);
 }
@@ -816,6 +824,109 @@ fileDoc.addEventListener('change', async () => {
     btnSubirDoc.querySelector('.btn-texto').textContent = 'Subir documento de identidad';
     fileDoc.value = '';
     cargando.querySelector('p').textContent = 'Consultando listas de sanciones internacionales…';
+  }
+});
+
+// ── Beneficiarios Finales (Art. 26-A y 28, Ley 23 de 2015) ───────────────────
+async function cargarBeneficiarios(clienteId) {
+  const tbody = document.getElementById('tbody-beneficiarios');
+  tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const res  = await fetch(`/api/clientes/${clienteId}/beneficiarios`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cargar beneficiarios.');
+
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">No hay beneficiarios registrados. Agregue uno con el formulario superior.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map(bf => {
+      const hayAlerta = bf.coincidencia;
+      const veredicto = hayAlerta
+        ? '<span class="resultado-alerta">⚠ COINCIDENCIA</span>'
+        : '<span class="resultado-ok">✓ Limpio</span>';
+      return `
+        <tr class="${hayAlerta ? 'es-alerta' : ''}">
+          <td>${esc(bf.nombre)}</td>
+          <td>${esc(bf.cedula || '—')}</td>
+          <td>${esc(bf.nacionalidad || '—')}</td>
+          <td>${bf.participacion != null ? esc(String(bf.participacion)) + '%' : '—'}</td>
+          <td>${esc(bf.cargo || '—')}</td>
+          <td>${veredicto}</td>
+          <td><button class="btn-borrar btn-borrar-bf" data-cliente="${clienteId}" data-id="${bf.id}">✕</button></td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.btn-borrar-bf').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este beneficiario final?')) return;
+      try {
+        await fetch(`/api/clientes/${btn.dataset.cliente}/beneficiarios/${btn.dataset.id}`, { method: 'DELETE' });
+        cargarBeneficiarios(btn.dataset.cliente);
+        document.getElementById('bf-resultado-busqueda').classList.add('oculto');
+      } catch (err) {
+        alert(`Error al eliminar: ${err.message}`);
+      }
+    }));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('form-nuevo-beneficiario').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!clienteEnFicha) return;
+
+  const errEl  = document.getElementById('error-beneficiario');
+  const btnEl  = document.getElementById('btn-agregar-bf');
+  const txtEl  = btnEl.querySelector('.btn-texto');
+  const resDiv = document.getElementById('bf-resultado-busqueda');
+  errEl.classList.add('oculto');
+  resDiv.classList.add('oculto');
+
+  const body = {
+    nombre        : document.getElementById('bf-nombre').value.trim(),
+    cedula        : document.getElementById('bf-cedula').value.trim(),
+    nacionalidad  : document.getElementById('bf-nacionalidad').value.trim(),
+    participacion : document.getElementById('bf-participacion').value,
+    cargo         : document.getElementById('bf-cargo').value.trim(),
+    usuario       : usuarioActual,
+  };
+
+  if (!body.nombre) {
+    mostrarError(errEl, 'El nombre del beneficiario es obligatorio.');
+    return;
+  }
+
+  btnEl.disabled = true;
+  txtEl.textContent = 'Verificando en listas AML…';
+
+  try {
+    const res  = await fetch(`/api/clientes/${clienteEnFicha.id}/beneficiarios`, {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al agregar beneficiario.');
+
+    document.getElementById('form-nuevo-beneficiario').reset();
+
+    const hayCoincidencia = data.coincidencia;
+    resDiv.className = hayCoincidencia
+      ? 'veredicto-banner coincidencia'
+      : 'veredicto-banner sin-coincidencia';
+    resDiv.innerHTML = hayCoincidencia
+      ? `<span>⚠</span> <span><strong>${esc(data.nombre)}</strong> — COINCIDENCIA DETECTADA EN LISTAS AML/FT</span>`
+      : `<span>✓</span> <span><strong>${esc(data.nombre)}</strong> — Sin coincidencias en ONU, OFAC, UE ni PEP</span>`;
+    resDiv.classList.remove('oculto');
+
+    cargarBeneficiarios(clienteEnFicha.id);
+  } catch (err) {
+    mostrarError(errEl, err.message);
+  } finally {
+    btnEl.disabled = false;
+    txtEl.textContent = 'Agregar y Verificar en Listas AML';
   }
 });
 

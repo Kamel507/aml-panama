@@ -117,6 +117,13 @@ async function initDB() {
   agregarColumnaSiNoExiste("ALTER TABLE consultas ADD COLUMN resultado_gafi TEXT");
   agregarColumnaSiNoExiste("ALTER TABLE consultas ADD COLUMN listas_consultadas TEXT");
 
+// Migración: nivel de riesgo y perfil financiero/transaccional para clientes (Art. 26-B, 40 Ley 23)
+agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN nivel_riesgo TEXT DEFAULT 'pendiente'");
+agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN factores_riesgo TEXT");
+agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN actividad_economica TEXT");
+agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN origen_fondos TEXT");
+agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN rango_ingresos TEXT");
+
   db.run(`
     CREATE TABLE IF NOT EXISTS pep_personas (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +148,22 @@ async function initDB() {
   `);
 
   db.run(`
+  CREATE TABLE IF NOT EXISTS beneficiarios_finales (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id               INTEGER NOT NULL,
+    nombre                   TEXT NOT NULL,
+    cedula                   TEXT,
+    nacionalidad             TEXT,
+    porcentaje_participacion REAL,
+    cargo                    TEXT,
+    resultado_listas         TEXT,
+    coincidencia             INTEGER DEFAULT 0,
+    fecha_revision           TEXT,
+    creado_en                TEXT DEFAULT (datetime('now','localtime'))
+  )
+`);
+
+db.run(`
     CREATE TABLE IF NOT EXISTS clientes (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre           TEXT NOT NULL,
@@ -1108,6 +1131,76 @@ app.post('/api/clientes/:id/documentos', uploadDocCliente.single('documento'), (
     ]
   );
   res.json(dbGet('SELECT * FROM documentos_cliente WHERE id = ?', [id]));
+});
+
+
+// ───── Beneficiarios Finales (Art. 26-A, 28 Ley 23 — personas jurídicas) ─────
+app.get('/api/clientes/:id/beneficiarios', (req, res) => {
+  const cliente = dbGet('SELECT * FROM clientes WHERE id = ?', [req.params.id]);
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado.' });
+  const beneficiarios = dbAll('SELECT * FROM beneficiarios_finales WHERE cliente_id = ? ORDER BY id', [req.params.id]);
+  res.json(beneficiarios);
+});
+
+app.post('/api/clientes/:id/beneficiarios', async (req, res) => {
+  const cliente = dbGet('SELECT * FROM clientes WHERE id = ?', [req.params.id]);
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado.' });
+
+  const { nombre, cedula, nacionalidad, porcentajeParticipacion, cargo, usuario } = req.body;
+  const nombreT = (nombre || '').trim();
+  if (!nombreT) return res.status(400).json({ error: 'El nombre del beneficiario final es obligatorio.' });
+  const cedulaT = (cedula || '').trim();
+  const { fecha, hora } = ahoraPA();
+
+  let onuHits = [], ofacHits = [], ueHits = [], pepHits = [];
+  const errores = [];
+
+  try { const lista = await fetchUNList(); onuHits = buscarEnLista(lista.entries, { nombre: nombreT, cedula: cedulaT }); }
+  catch (e) { errores.push(`ONU: ${e.message}`); }
+
+  try { const lista = await fetchOFACList(); ofacHits = buscarEnLista(lista.entries, { nombre: nombreT, cedula: cedulaT }); }
+  catch (e) { errores.push(`OFAC: ${e.message}`); }
+
+  try { const lista = await fetchEUList(); ueHits = buscarEnLista(lista.entries, { nombre: nombreT, cedula: cedulaT }); }
+  catch (e) { errores.push(`UE: ${e.message}`); }
+
+  try { pepHits = buscarEnLista(pepEntries(), { nombre: nombreT, cedula: cedulaT }); }
+  catch (e) { errores.push(`PEP: ${e.message}`); }
+
+  const hayCoincidencia = onuHits.length > 0 || ofacHits.length > 0 || ueHits.length > 0 || pepHits.length > 0;
+  const resultadoTexto = (n) => (n > 0 ? `${n} coincidencia(s)` : 'Sin coincidencias');
+  const detalles = JSON.stringify({ onuHits, ofacHits, ueHits, pepHits });
+  const resumen = `ONU: ${resultadoTexto(onuHits.length)} | OFAC: ${resultadoTexto(ofacHits.length)} | UE: ${resultadoTexto(ueHits.length)} | PEP: ${resultadoTexto(pepHits.length)}`;
+
+  const id = dbInsert(
+    `INSERT INTO beneficiarios_finales
+      (cliente_id, nombre, cedula, nacionalidad, porcentaje_participacion, cargo, resultado_listas, coincidencia, fecha_revision)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      cliente.id,
+      nombreT,
+      cedulaT || null,
+      (nacionalidad || '').trim() || null,
+      porcentajeParticipacion || null,
+      (cargo || '').trim() || null,
+      resumen,
+      hayCoincidencia ? 1 : 0,
+      `${fecha} ${hora}`,
+    ]
+  );
+
+  res.json({
+    ...dbGet('SELECT * FROM beneficiarios_finales WHERE id = ?', [id]),
+    detalles,
+    errores,
+  });
+});
+
+app.delete('/api/clientes/:id/beneficiarios/:bfId', (req, res) => {
+  const beneficiario = dbGet('SELECT * FROM beneficiarios_finales WHERE id = ? AND cliente_id = ?', [req.params.bfId, req.params.id]);
+  if (!beneficiario) return res.status(404).json({ error: 'Beneficiario final no encontrado.' });
+  dbExec('DELETE FROM beneficiarios_finales WHERE id = ?', [req.params.bfId]);
+  res.json({ ok: true });
 });
 
 app.get('/api/clientes/:id/documentos/:docId/descargar', (req, res) => {
