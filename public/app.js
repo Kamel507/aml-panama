@@ -560,7 +560,7 @@ document.getElementById('nc-tipo').addEventListener('change', function () {
 
 // ── Agregar filas de beneficiario en formulario nuevo cliente ─────────────────
 let _ncBfCount = 0;
-const btnAgregarBfFila = document.getElementById('btn-nc-agregar-bf');
+const btnAgregarBfFila = document.getElementById('btn-agregar-bf-fila');
 if (btnAgregarBfFila) {
   btnAgregarBfFila.addEventListener('click', () => {
     _ncBfCount++;
@@ -570,7 +570,7 @@ if (btnAgregarBfFila) {
     div.dataset.idx = _ncBfCount;
     div.innerHTML = `
       <div class="campos-fila">
-        <div class="campo"><label>Nombre completo *</label><input type="text" name="nc-bf-nombre-${_ncBfCount}" class="nc-bf-nombre" required /></div>
+        <div class="campo"><label>Nombre completo *</label><input type="text" name="nc-bf-nombre-${_ncBfCount}" class="nc-bf-nombre" /></div>
         <div class="campo"><label>Cédula / Pasaporte</label><input type="text" name="nc-bf-cedula-${_ncBfCount}" class="nc-bf-cedula" /></div>
       </div>
       <div class="campos-fila">
@@ -1414,11 +1414,11 @@ async function cargarROS() {
       return `
         <tr class="${!esReportado ? 'es-alerta' : ''}">
           <td>${r.id}</td>
-          <td>${esc(r.cliente_nombre || r.cliente_id || '—')}</td>
           <td>${esc(r.fecha_deteccion || '—')}</td>
           <td><strong>${esc(r.fecha_limite || '—')}</strong></td>
-          <td>${r.monto ? 'USD ' + Number(r.monto).toLocaleString('es-PA') : '—'}</td>
+          <td>${esc(r.cliente_nombre || r.cliente_id || '—')}</td>
           <td>${esc(r.tipo_operacion || '—')}</td>
+          <td>${r.monto ? 'USD ' + Number(r.monto).toLocaleString('es-PA') : '—'}</td>
           <td>
             <span class="badge-ros badge-ros--${esc(r.estado)}">
               ${esReportado ? '✓ Reportado' : '📝 Borrador'}
@@ -1464,8 +1464,8 @@ if (formRos) {
     const err = document.getElementById('error-ros');
     if (err) err.classList.add('oculto');
     const body = {
-      clienteId     : document.getElementById('ros-cliente-id').value || null,
-      fechaDeteccion: document.getElementById('ros-fecha').value,
+      clienteId     : document.getElementById('ros-cliente').value || null,
+      fechaDeteccion: document.getElementById('ros-fecha-deteccion').value,
       tipoOperacion : document.getElementById('ros-tipo').value.trim(),
       monto         : document.getElementById('ros-monto').value || null,
       descripcion   : document.getElementById('ros-descripcion').value.trim(),
@@ -1482,6 +1482,7 @@ if (formRos) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al crear ROS.');
       formRos.reset();
+      document.getElementById('form-nuevo-ros-tarjeta').classList.add('oculto');
       cargarROS();
     } catch (e2) {
       if (err) { err.textContent = e2.message; err.classList.remove('oculto'); }
@@ -1492,15 +1493,30 @@ if (formRos) {
 
 // Cargar select de clientes en tab ROS
 async function cargarSelectClientesROS() {
-  const sel = document.getElementById('ros-cliente-id');
+  const sel = document.getElementById('ros-cliente');
   if (!sel || sel.dataset.cargado) return;
   try {
     const res  = await fetch('/api/clientes');
     const data = await res.json();
-    sel.innerHTML = '<option value="">— Sin cliente asociado —</option>' +
+    sel.innerHTML = '<option value="">— Sin vincular —</option>' +
       data.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
     sel.dataset.cargado = '1';
   } catch (_) {}
+}
+
+// Mostrar / ocultar formulario de nuevo ROS (tab global)
+const btnNuevoRos = document.getElementById('btn-nuevo-ros');
+if (btnNuevoRos) {
+  btnNuevoRos.addEventListener('click', () => {
+    document.getElementById('form-nuevo-ros-tarjeta').classList.remove('oculto');
+  });
+}
+const btnCancelarRos = document.getElementById('btn-cancelar-ros');
+if (btnCancelarRos) {
+  btnCancelarRos.addEventListener('click', () => {
+    document.getElementById('form-nuevo-ros-tarjeta').classList.add('oculto');
+    formRos.reset();
+  });
 }
 
 // ── Actualizar tab handler para ROS ──────────────────────────────────────────
