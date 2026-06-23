@@ -602,6 +602,16 @@ function renderizarFicha(cliente, documentos, historial) {
   document.getElementById('ficha-fecha-nacimiento').textContent = cliente.fecha_nacimiento || '—';
   document.getElementById('ficha-creado').textContent = cliente.creado_en || '—';
 
+  const RIESGO_LABELS = { bajo: 'Bajo', medio: 'Medio', alto: 'Alto — Diligencia Ampliada', pendiente: 'Pendiente' };
+  const RIESGO_CLASES = { bajo: 'badge-riesgo--bajo', medio: 'badge-riesgo--medio', alto: 'badge-riesgo--alto', pendiente: 'badge-riesgo--pendiente' };
+  const nivel = cliente.nivel_riesgo || 'pendiente';
+  const badgeEl = document.getElementById('ficha-nivel-riesgo');
+  badgeEl.textContent = RIESGO_LABELS[nivel] || nivel;
+  badgeEl.className = `badge-riesgo ${RIESGO_CLASES[nivel] || 'badge-riesgo--pendiente'}`;
+
+  const actEl = document.getElementById('ficha-actividad-economica');
+  actEl.textContent = cliente.actividad_economica ? `· ${cliente.actividad_economica}` : '';
+
   document.getElementById('form-editar-cliente').classList.add('oculto');
 
   const cardBf = document.getElementById('card-beneficiarios');
@@ -681,6 +691,10 @@ document.getElementById('btn-editar-cliente').addEventListener('click', () => {
   document.getElementById('ec-nacionalidad').value = clienteEnFicha.nacionalidad || '';
   document.getElementById('ec-fecha-nacimiento').value = clienteEnFicha.fecha_nacimiento || '';
   document.getElementById('ec-notas').value = clienteEnFicha.notas || '';
+  document.getElementById('ec-nivel-riesgo').value = clienteEnFicha.nivel_riesgo || 'pendiente';
+  document.getElementById('ec-actividad-economica').value = clienteEnFicha.actividad_economica || '';
+  document.getElementById('ec-origen-fondos').value = clienteEnFicha.origen_fondos || '';
+  document.getElementById('ec-rango-ingresos').value = clienteEnFicha.rango_ingresos || '';
   f.classList.remove('oculto');
 });
 document.getElementById('btn-cancelar-editar-cliente').addEventListener('click', () => {
@@ -691,12 +705,16 @@ document.getElementById('form-editar-cliente').addEventListener('submit', async 
   e.preventDefault();
   if (!clienteEnFicha) return;
   const body = {
-    nombre         : document.getElementById('ec-nombre').value.trim(),
-    cedula         : document.getElementById('ec-cedula').value.trim(),
-    tipo           : document.getElementById('ec-tipo').value,
-    nacionalidad   : document.getElementById('ec-nacionalidad').value.trim(),
-    fechaNacimiento: document.getElementById('ec-fecha-nacimiento').value.trim(),
-    notas          : document.getElementById('ec-notas').value.trim(),
+    nombre            : document.getElementById('ec-nombre').value.trim(),
+    cedula            : document.getElementById('ec-cedula').value.trim(),
+    tipo              : document.getElementById('ec-tipo').value,
+    nacionalidad      : document.getElementById('ec-nacionalidad').value.trim(),
+    fechaNacimiento   : document.getElementById('ec-fecha-nacimiento').value.trim(),
+    notas             : document.getElementById('ec-notas').value.trim(),
+    nivelRiesgo       : document.getElementById('ec-nivel-riesgo').value,
+    actividadEconomica: document.getElementById('ec-actividad-economica').value.trim(),
+    origenFondos      : document.getElementById('ec-origen-fondos').value.trim(),
+    rangoIngresos     : document.getElementById('ec-rango-ingresos').value.trim(),
   };
   try {
     const res  = await fetch(`/api/clientes/${clienteEnFicha.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

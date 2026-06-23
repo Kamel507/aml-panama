@@ -737,3 +737,66 @@ body {
 }
 .documento-nombre { flex: 1; font-size: 0.88rem; color: var(--texto); min-width: 120px; }
 .documento-fecha { font-size: 0.78rem; color: var(--texto-sub); }
+
+/* ── Beneficiarios Finales ──────────────────────────────── */
+.subtitulo-legal {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--texto-sub);
+  margin-left: 8px;
+  font-style: italic;
+}
+
+/* ── Perfil de Riesgo (Art. 26-B, 40) ─────────────────── */
+.perfil-riesgo-fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+  flex-wrap: wrap;
+}
+.perfil-riesgo-label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--texto-sub);
+}
+.perfil-riesgo-detalle {
+  font-size: 0.84rem;
+  color: var(--texto-sub);
+  font-style: italic;
+}
+.badge-riesgo {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge-riesgo--pendiente { background: #F0F0F0; color: #666; border: 1px solid #CCC; }
+.badge-riesgo--bajo      { background: var(--verde-claro); color: var(--verde); border: 1px solid var(--verde-borde); }
+.badge-riesgo--medio     { background: #FFF3CD; color: #856404; border: 1px solid #FFCD6B; }
+.badge-riesgo--alto      { background: var(--rojo-claro); color: var(--rojo); border: 1px solid var(--rojo-borde); }
+
+.seccion-riesgo-edit {
+  border-top: 1px solid var(--gris-borde);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+.seccion-riesgo-edit h3 {
+  font-size: 0.88rem;
+  color: var(--azul);
+  font-weight: 700;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.seccion-riesgo-edit select {
+  padding: 11px 14px;
+  border: 1.5px solid var(--gris-borde);
+  border-radius: 6px;
+  font-size: 1rem;
+  background: #fafbff;
+  color: var(--texto);
+}

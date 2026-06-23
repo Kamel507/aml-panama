@@ -316,6 +316,12 @@
             <div><strong>Creado:</strong> <span id="ficha-creado">—</span></div>
           </div>
 
+          <div class="perfil-riesgo-fila">
+            <span class="perfil-riesgo-label">Nivel de riesgo (Art. 26-B):</span>
+            <span id="ficha-nivel-riesgo" class="badge-riesgo badge-riesgo--pendiente">Pendiente</span>
+            <span class="perfil-riesgo-detalle" id="ficha-actividad-economica"></span>
+          </div>
+
           <button id="btn-editar-cliente" class="btn-secundario btn-chico">✎ Editar datos</button>
 
           <form id="form-editar-cliente" class="oculto">
@@ -352,6 +358,36 @@
                 <input type="text" id="ec-notas" maxlength="300" />
               </div>
             </div>
+
+            <div class="seccion-riesgo-edit">
+              <h3>Perfil de Riesgo — Art. 26-B y 40, Ley 23 de 2015</h3>
+              <div class="campos-fila">
+                <div class="campo">
+                  <label for="ec-nivel-riesgo">Nivel de riesgo</label>
+                  <select id="ec-nivel-riesgo">
+                    <option value="pendiente">Pendiente de evaluación</option>
+                    <option value="bajo">Bajo</option>
+                    <option value="medio">Medio</option>
+                    <option value="alto">Alto — Diligencia Ampliada</option>
+                  </select>
+                </div>
+                <div class="campo">
+                  <label for="ec-actividad-economica">Actividad económica</label>
+                  <input type="text" id="ec-actividad-economica" maxlength="200" placeholder="Ej: Comercio al por mayor, servicios financieros…" />
+                </div>
+              </div>
+              <div class="campos-fila">
+                <div class="campo">
+                  <label for="ec-origen-fondos">Origen de fondos</label>
+                  <input type="text" id="ec-origen-fondos" maxlength="200" placeholder="Ej: Ingresos por ventas, herencia, inversiones…" />
+                </div>
+                <div class="campo">
+                  <label for="ec-rango-ingresos">Rango de ingresos / patrimonio</label>
+                  <input type="text" id="ec-rango-ingresos" maxlength="100" placeholder="Ej: USD 10,000–50,000 mensuales" />
+                </div>
+              </div>
+            </div>
+
             <div class="acciones-formulario">
               <button type="submit" class="btn-primario">Guardar Cambios</button>
               <button type="button" id="btn-cancelar-editar-cliente" class="btn-secundario">Cancelar</button>
@@ -408,6 +444,8 @@
                 <label for="bf-participacion">% de participación</label>
                 <input type="number" id="bf-participacion" min="0" max="100" step="0.01" placeholder="Ej: 25.00" />
               </div>
+            </div>
+            <div class="campos-fila">
               <div class="campo">
                 <label for="bf-cargo">Cargo / Rol</label>
                 <input type="text" id="bf-cargo" maxlength="150" placeholder="Ej: Accionista, Director" autocomplete="off" />

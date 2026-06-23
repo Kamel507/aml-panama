@@ -117,13 +117,6 @@ async function initDB() {
   agregarColumnaSiNoExiste("ALTER TABLE consultas ADD COLUMN resultado_gafi TEXT");
   agregarColumnaSiNoExiste("ALTER TABLE consultas ADD COLUMN listas_consultadas TEXT");
 
-// Migración: nivel de riesgo y perfil financiero/transaccional para clientes (Art. 26-B, 40 Ley 23)
-agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN nivel_riesgo TEXT DEFAULT 'pendiente'");
-agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN factores_riesgo TEXT");
-agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN actividad_economica TEXT");
-agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN origen_fondos TEXT");
-agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN rango_ingresos TEXT");
-
   db.run(`
     CREATE TABLE IF NOT EXISTS pep_personas (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,7 +156,7 @@ agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN rango_ingresos TEXT");
   )
 `);
 
-db.run(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS clientes (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre           TEXT NOT NULL,
@@ -177,6 +170,12 @@ db.run(`
       creado_en        TEXT DEFAULT (datetime('now','localtime'))
     )
   `);
+
+  // Migración: perfil de riesgo y debida diligencia ampliada (Art. 26-B, 40, Ley 23 de 2015)
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN nivel_riesgo TEXT DEFAULT 'pendiente'");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN actividad_economica TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN origen_fondos TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN rango_ingresos TEXT");
 
   db.run(`
     CREATE TABLE IF NOT EXISTS documentos_cliente (
@@ -1092,10 +1091,12 @@ app.put('/api/clientes/:id', (req, res) => {
   const cliente = dbGet('SELECT * FROM clientes WHERE id = ?', [req.params.id]);
   if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado.' });
 
-  const { nombre, cedula, tipo, nacionalidad, fechaNacimiento, notas } = req.body;
+  const { nombre, cedula, tipo, nacionalidad, fechaNacimiento, notas,
+          nivelRiesgo, actividadEconomica, origenFondos, rangoIngresos } = req.body;
   dbExec(
     `UPDATE clientes
-     SET nombre = ?, cedula = ?, tipo = ?, nacionalidad = ?, fecha_nacimiento = ?, notas = ?
+     SET nombre = ?, cedula = ?, tipo = ?, nacionalidad = ?, fecha_nacimiento = ?, notas = ?,
+         nivel_riesgo = ?, actividad_economica = ?, origen_fondos = ?, rango_ingresos = ?
      WHERE id = ?`,
     [
       (nombre ?? cliente.nombre).trim() || cliente.nombre,
@@ -1104,6 +1105,10 @@ app.put('/api/clientes/:id', (req, res) => {
       nacionalidad ?? cliente.nacionalidad,
       fechaNacimiento ?? cliente.fecha_nacimiento,
       notas ?? cliente.notas,
+      nivelRiesgo ?? cliente.nivel_riesgo,
+      actividadEconomica ?? cliente.actividad_economica,
+      origenFondos ?? cliente.origen_fondos,
+      rangoIngresos ?? cliente.rango_ingresos,
       cliente.id,
     ]
   );
@@ -1146,7 +1151,7 @@ app.post('/api/clientes/:id/beneficiarios', async (req, res) => {
   const cliente = dbGet('SELECT * FROM clientes WHERE id = ?', [req.params.id]);
   if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado.' });
 
-  const { nombre, cedula, nacionalidad, porcentajeParticipacion, cargo, usuario } = req.body;
+  const { nombre, cedula, nacionalidad, participacion, cargo, usuario } = req.body;
   const nombreT = (nombre || '').trim();
   if (!nombreT) return res.status(400).json({ error: 'El nombre del beneficiario final es obligatorio.' });
   const cedulaT = (cedula || '').trim();
@@ -1181,7 +1186,7 @@ app.post('/api/clientes/:id/beneficiarios', async (req, res) => {
       nombreT,
       cedulaT || null,
       (nacionalidad || '').trim() || null,
-      porcentajeParticipacion || null,
+      participacion != null && participacion !== '' ? Number(participacion) : null,
       (cargo || '').trim() || null,
       resumen,
       hayCoincidencia ? 1 : 0,
@@ -1235,7 +1240,7 @@ app.delete('/api/clientes/:id/documentos/:docId', (req, res) => {
 // ─── API: Reporte PDF ─────────────────────────────────────────────────────────
 app.get('/api/reporte/:id', (req, res) => {
   const row = dbGet(
-    `SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula
+    `SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula, cl.tipo AS cliente_tipo
      FROM consultas c LEFT JOIN clientes cl ON cl.id = c.cliente_id
      WHERE c.id = ?`,
     [req.params.id]
@@ -1245,17 +1250,22 @@ app.get('/api/reporte/:id', (req, res) => {
   let detalles = { onuHits: [], ofacHits: [], ueHits: [], pepHits: [], gafiResultado: null };
   try { detalles = JSON.parse(row.detalles); } catch {}
 
+  let beneficiarios = [];
+  if (row.cliente_id && row.cliente_tipo === 'juridica') {
+    beneficiarios = dbAll('SELECT * FROM beneficiarios_finales WHERE cliente_id = ? ORDER BY id', [row.cliente_id]);
+  }
+
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="reporte-aml-${row.id}.pdf"`);
 
   const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
   doc.pipe(res);
-  generarPDF(doc, row, detalles);
+  generarPDF(doc, row, detalles, beneficiarios);
   doc.end();
 });
 
 // ─── Generador de PDF ─────────────────────────────────────────────────────────
-function generarPDF(doc, consulta, detalles) {
+function generarPDF(doc, consulta, detalles, beneficiarios = []) {
   const { onuHits = [], ofacHits = [], ueHits = [], pepHits = [], gafiResultado = null } = detalles;
   const coincidencia = consulta.coincidencia === 1 || consulta.coincidencia === true;
 
@@ -1365,6 +1375,46 @@ function generarPDF(doc, consulta, detalles) {
   }
 
   y += 14;
+
+  // ── Beneficiarios Finales (Art. 26-A, 28 — solo jurídicas) ──
+  if (beneficiarios.length > 0) {
+    verificarEspacio(doc, y, 60);
+    y = doc.y + 5;
+    doc.fillColor(C.negro).font('Helvetica-Bold').fontSize(11)
+       .text('BENEFICIARIOS FINALES (Art. 26-A y 28, Ley 23 de 2015)', 50, y);
+    y += 16;
+    doc.moveTo(50, y).lineTo(PW - 50, y).strokeColor('#AAAAAA').lineWidth(0.5).stroke();
+    y += 10;
+
+    for (const bf of beneficiarios) {
+      verificarEspacio(doc, y, 55);
+      y = doc.y + 4;
+      const bfColor = bf.coincidencia ? C.rojoClaro : C.verdeClaro;
+      const bfBorde = bf.coincidencia ? C.rojo : C.verde;
+      doc.rect(50, y, PW - 100, 44).fill(bfColor);
+      doc.moveTo(50, y).lineTo(50, y + 44).strokeColor(bfBorde).lineWidth(4).stroke();
+
+      doc.fillColor(C.negro).font('Helvetica-Bold').fontSize(8.5)
+         .text(bf.nombre, 60, y + 7, { width: PW - 180, continued: false });
+      doc.font('Helvetica').fontSize(7.5)
+         .text([
+           bf.cedula        ? `Cédula: ${bf.cedula}`                                    : null,
+           bf.nacionalidad  ? `Nac.: ${bf.nacionalidad}`                                : null,
+           bf.porcentaje_participacion != null ? `Part.: ${bf.porcentaje_participacion}%` : null,
+           bf.cargo         ? `Cargo: ${bf.cargo}`                                      : null,
+         ].filter(Boolean).join('   '), 60, y + 20, { width: PW - 180 });
+
+      const bfVeredicto = bf.coincidencia ? '⚠ COINCIDENCIA EN LISTAS' : '✓ Sin coincidencias';
+      doc.fillColor(bf.coincidencia ? C.rojo : C.verde).font('Helvetica-Bold').fontSize(7.5)
+         .text(bfVeredicto, PW - 170, y + 10, { width: 120, align: 'right' });
+      if (bf.resultado_listas) {
+        doc.fillColor(C.gris).font('Helvetica').fontSize(6.5)
+           .text(bf.resultado_listas, PW - 170, y + 24, { width: 120, align: 'right' });
+      }
+      y += 52;
+    }
+    y += 6;
+  }
 
   // ── Conclusión ──
   verificarEspacio(doc, y, 80);
