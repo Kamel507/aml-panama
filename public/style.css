@@ -1053,3 +1053,6 @@ body {
   color: var(--texto);
 }
 .campo-check input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+/* ── Badges de operaciones inusuales y congelamiento ────── */
+.badge-inusual--escalada  { background: var(--rojo-claro); color: var(--rojo); border: 1px solid var(--rojo-borde); }
+.badge-congel--congelado  { background: #E3F2FD; color: #0D47A1; border: 1px solid #64B5F6; }

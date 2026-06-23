@@ -17,6 +17,8 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (id === 'historial') cargarHistorial();
     if (id === 'alertas')   cargarAlertas();
     if (id === 'ros')       { cargarROS(); cargarSelectClientesROS(); }
+    if (id === 'inusuales') { cargarInusuales(); cargarSelectClientesEn('inu-cliente'); }
+    if (id === 'congelamiento') { cargarCongelamientos(); cargarSelectClientesEn('con-cliente'); }
     if (id === 'estado')    { cargarEstadoListas(); cargarPep(); cargarGafi(); }
     if (id === 'clientes') {
       contextoExpediente = btn.dataset.expediente === 'proveedor' ? 'proveedor' : 'cliente';
@@ -1786,6 +1788,230 @@ document.getElementById('btn-retamizar-colab').addEventListener('click', async (
     if (!res.ok) throw new Error(data.error || 'Error al re-tamizar.');
     abrirFichaColab(colabEnFicha.id);
   } catch (err) { alert(`Error: ${err.message}`); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Select compartido de clientes + proveedores (para vincular registros)
+// ═══════════════════════════════════════════════════════════════════════════
+async function cargarSelectClientesEn(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel || sel.dataset.cargado) return;
+  try {
+    const [cli, prov] = await Promise.all([
+      fetch('/api/clientes?expediente=cliente').then(r => r.json()),
+      fetch('/api/clientes?expediente=proveedor').then(r => r.json()),
+    ]);
+    let html = '<option value="">— Sin vincular —</option>';
+    if (cli.length)  html += '<optgroup label="Clientes">' + cli.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('') + '</optgroup>';
+    if (prov.length) html += '<optgroup label="Proveedores">' + prov.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('') + '</optgroup>';
+    sel.innerHTML = html;
+    sel.dataset.cargado = '1';
+  } catch (_) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  OPERACIONES INUSUALES — Decreto 35 de 2022 (paso previo al ROS)
+// ═══════════════════════════════════════════════════════════════════════════
+const INUSUAL_ESTADO = {
+  pendiente_analisis: { txt: '⏳ Pendiente de análisis', clase: 'badge-ros--borrador' },
+  descartada:         { txt: '✓ Descartada',            clase: 'badge-ros--reportado' },
+  escalada_ros:       { txt: '⚠ Escalada a ROS',        clase: 'badge-inusual--escalada' },
+};
+
+async function cargarInusuales() {
+  const tbody = document.getElementById('tbody-inusuales');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const data = await (await fetch('/api/inusuales')).json();
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Sin operaciones inusuales registradas.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(o => {
+      const e = INUSUAL_ESTADO[o.estado] || { txt: o.estado, clase: '' };
+      const pend = o.estado === 'pendiente_analisis';
+      return `
+        <tr class="${pend ? 'es-alerta' : ''}">
+          <td>${o.id}</td>
+          <td>${esc(o.fecha_deteccion || '—')}</td>
+          <td>${esc(o.cliente_nombre || '—')}</td>
+          <td>${esc(o.tipo_operacion || '—')}</td>
+          <td>${o.monto ? 'USD ' + esc(o.monto) : '—'}</td>
+          <td><span class="badge-ros ${e.clase}">${e.txt}</span>${o.ros_id ? ` <span class="subtitulo-legal">(ROS #${o.ros_id})</span>` : ''}</td>
+          <td>
+            ${pend ? `<button class="btn-primario btn-chico btn-analizar-inusual" data-id="${o.id}">Analizar</button> ` : ''}
+            <button class="btn-borrar btn-chico btn-borrar-inusual" data-id="${o.id}">✕</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.btn-analizar-inusual').forEach(btn => btn.addEventListener('click', () => analizarInusual(btn.dataset.id)));
+    tbody.querySelectorAll('.btn-borrar-inusual').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta operación inusual?')) return;
+      await fetch(`/api/inusuales/${btn.dataset.id}`, { method: 'DELETE' });
+      cargarInusuales();
+    }));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+async function analizarInusual(id) {
+  const decision = prompt('Análisis del Oficial de Cumplimiento.\n\nEscriba "ESCALAR" para escalar a ROS (se creará el ROS automáticamente),\no "DESCARTAR" para descartar la operación:');
+  if (!decision) return;
+  const dec = decision.trim().toUpperCase();
+  let estado;
+  if (dec.startsWith('ESCAL')) estado = 'escalada_ros';
+  else if (dec.startsWith('DESCART')) estado = 'descartada';
+  else { alert('Escriba ESCALAR o DESCARTAR.'); return; }
+
+  const analisis = prompt('Justificación / análisis (se documenta en el expediente):') || '';
+  try {
+    const res = await fetch(`/api/inusuales/${id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ estado, analisis, analizadaPor: usuarioActual }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al analizar.');
+    if (data.rosCreado) alert(`Operación escalada. Se creó el ROS #${data.rosCreado} (borrador). Revíselo en la pestaña ROS para reportarlo a la UAF dentro de 3 días hábiles.`);
+    cargarInusuales();
+  } catch (err) { alert(`Error: ${err.message}`); }
+}
+
+const btnNuevaInusual = document.getElementById('btn-nueva-inusual');
+if (btnNuevaInusual) btnNuevaInusual.addEventListener('click', () => document.getElementById('form-nueva-inusual-tarjeta').classList.remove('oculto'));
+const btnCancelarInusual = document.getElementById('btn-cancelar-inusual');
+if (btnCancelarInusual) btnCancelarInusual.addEventListener('click', () => {
+  document.getElementById('form-nueva-inusual-tarjeta').classList.add('oculto');
+  document.getElementById('form-nueva-inusual').reset();
+});
+
+const formInusual = document.getElementById('form-nueva-inusual');
+if (formInusual) formInusual.addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-inusual');
+  err.classList.add('oculto');
+  const body = {
+    clienteId     : document.getElementById('inu-cliente').value || null,
+    fechaDeteccion: document.getElementById('inu-fecha').value,
+    tipoOperacion : document.getElementById('inu-tipo').value.trim(),
+    monto         : document.getElementById('inu-monto').value.trim(),
+    descripcion   : document.getElementById('inu-descripcion').value.trim(),
+    detectadaPor  : document.getElementById('inu-detectada-por').value.trim() || usuarioActual,
+    notas         : document.getElementById('inu-notas').value.trim(),
+    usuario       : usuarioActual,
+  };
+  if (!body.descripcion || !body.fechaDeteccion) { mostrarError(err, 'Fecha y descripción son obligatorias.'); return; }
+  try {
+    const res = await fetch('/api/inusuales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al registrar.');
+    formInusual.reset();
+    document.getElementById('form-nueva-inusual-tarjeta').classList.add('oculto');
+    cargarInusuales();
+  } catch (e2) { mostrarError(err, e2.message); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONGELAMIENTO PREVENTIVO — Art. 41; Res. ONU 1267/1373/1718
+// ═══════════════════════════════════════════════════════════════════════════
+const CONGEL_ESTADO = {
+  pendiente:  { txt: '⏳ Pendiente', clase: 'badge-ros--borrador' },
+  congelado:  { txt: '🧊 Congelado', clase: 'badge-congel--congelado' },
+  reportado:  { txt: '✓ Reportado a autoridad', clase: 'badge-ros--reportado' },
+  levantado:  { txt: '↩ Levantado', clase: 'badge-ros--borrador' },
+};
+
+async function cargarCongelamientos() {
+  const tbody = document.getElementById('tbody-congelamientos');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const data = await (await fetch('/api/congelamientos')).json();
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Sin congelamientos registrados.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(g => {
+      const e = CONGEL_ESTADO[g.estado] || { txt: g.estado, clase: '' };
+      const activo = g.estado === 'pendiente' || g.estado === 'congelado';
+      return `
+        <tr class="${activo ? 'es-alerta' : ''}">
+          <td>${g.id}</td>
+          <td>${esc(g.nombre_persona)}${g.cliente_nombre ? ` <span class="subtitulo-legal">(${esc(g.cliente_nombre)})</span>` : ''}</td>
+          <td>${esc(g.lista_origen || '—')}${g.referencia_lista ? ` · ${esc(g.referencia_lista)}` : ''}</td>
+          <td>${esc(g.fecha_deteccion || '—')}</td>
+          <td>${g.monto_congelado ? 'USD ' + esc(g.monto_congelado) : '—'}</td>
+          <td><span class="badge-ros ${e.clase}">${e.txt}</span></td>
+          <td>
+            ${g.estado === 'pendiente' ? `<button class="btn-primario btn-chico btn-congel-accion" data-id="${g.id}" data-estado="congelado">Marcar congelado</button> ` : ''}
+            ${g.estado === 'congelado' ? `<button class="btn-primario btn-chico btn-congel-accion" data-id="${g.id}" data-estado="reportado">Marcar reportado</button> ` : ''}
+            <button class="btn-borrar btn-chico btn-congel-borrar" data-id="${g.id}">✕</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.btn-congel-accion').forEach(btn => btn.addEventListener('click', async () => {
+      const estado = btn.dataset.estado;
+      const body = { estado };
+      const { fecha } = { fecha: new Date().toISOString().split('T')[0] };
+      if (estado === 'congelado') body.fechaCongelamiento = fecha;
+      if (estado === 'reportado') {
+        body.reportadoA = prompt('¿A qué autoridad se reportó? (Ej: UAF, Ministerio Público, Intendencia):') || '';
+        body.numeroRef = prompt('Número de referencia del reporte (opcional):') || '';
+        body.fechaReporte = fecha;
+      }
+      try {
+        const res = await fetch(`/api/congelamientos/${btn.dataset.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error((await res.json()).error || 'Error');
+        cargarCongelamientos();
+      } catch (err) { alert(`Error: ${err.message}`); }
+    }));
+    tbody.querySelectorAll('.btn-congel-borrar').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este registro de congelamiento?')) return;
+      await fetch(`/api/congelamientos/${btn.dataset.id}`, { method: 'DELETE' });
+      cargarCongelamientos();
+    }));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+const btnNuevoCongel = document.getElementById('btn-nuevo-congelamiento');
+if (btnNuevoCongel) btnNuevoCongel.addEventListener('click', () => document.getElementById('form-nuevo-congelamiento-tarjeta').classList.remove('oculto'));
+const btnCancelarCongel = document.getElementById('btn-cancelar-congelamiento');
+if (btnCancelarCongel) btnCancelarCongel.addEventListener('click', () => {
+  document.getElementById('form-nuevo-congelamiento-tarjeta').classList.add('oculto');
+  document.getElementById('form-nuevo-congelamiento').reset();
+});
+
+const formCongel = document.getElementById('form-nuevo-congelamiento');
+if (formCongel) formCongel.addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-congelamiento');
+  err.classList.add('oculto');
+  const body = {
+    clienteId        : document.getElementById('con-cliente').value || null,
+    nombrePersona    : document.getElementById('con-nombre').value.trim(),
+    cedula           : document.getElementById('con-cedula').value.trim(),
+    listaOrigen      : document.getElementById('con-lista').value,
+    referenciaLista  : document.getElementById('con-referencia').value.trim(),
+    fechaDeteccion   : document.getElementById('con-fecha').value,
+    montoCongelado   : document.getElementById('con-monto').value.trim(),
+    descripcionBienes: document.getElementById('con-bienes').value.trim(),
+    notas            : document.getElementById('con-notas').value.trim(),
+    usuario          : usuarioActual,
+  };
+  if (!body.nombrePersona) { mostrarError(err, 'El nombre de la persona/entidad es obligatorio.'); return; }
+  try {
+    const res = await fetch('/api/congelamientos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al registrar.');
+    formCongel.reset();
+    document.getElementById('form-nuevo-congelamiento-tarjeta').classList.add('oculto');
+    cargarCongelamientos();
+  } catch (e2) { mostrarError(err, e2.message); }
 });
 
 // ── Utilidades ────────────────────────────────────────────

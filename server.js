@@ -213,6 +213,54 @@ async function initDB() {
     )
   `);
 
+  // Operaciones inusuales (Decreto 35 de 2022): registro previo al ROS. Toda
+  // operación que se aparte del perfil del cliente se documenta y analiza; si el
+  // análisis confirma sospecha, se escala a ROS (reportes_sospechosos).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS operaciones_inusuales (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      cliente_id      INTEGER,
+      fecha_deteccion TEXT NOT NULL,
+      tipo_operacion  TEXT,
+      monto           TEXT,
+      descripcion     TEXT NOT NULL,
+      detectada_por   TEXT,
+      estado          TEXT DEFAULT 'pendiente_analisis',
+      analisis        TEXT,
+      analizada_por   TEXT,
+      fecha_analisis  TEXT,
+      ros_id          INTEGER,
+      notas           TEXT,
+      creado_por      TEXT,
+      creado_en       TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  // Congelamiento preventivo de fondos (Art. 41 Ley 23; Resoluciones ONU
+  // 1267/1373/1718). Ante una coincidencia con listas de sanciones se congela
+  // de inmediato y se reporta a la autoridad competente.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS congelamientos (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      cliente_id         INTEGER,
+      nombre_persona     TEXT NOT NULL,
+      cedula             TEXT,
+      lista_origen       TEXT,
+      referencia_lista   TEXT,
+      fecha_deteccion    TEXT,
+      fecha_congelamiento TEXT,
+      monto_congelado    TEXT,
+      descripcion_bienes TEXT,
+      estado             TEXT DEFAULT 'pendiente',
+      reportado_a        TEXT,
+      fecha_reporte      TEXT,
+      numero_ref         TEXT,
+      notas              TEXT,
+      creado_por         TEXT,
+      creado_en          TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS reportes_sospechosos (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1989,6 +2037,193 @@ app.delete('/api/empleados/:id', (req, res) => {
   const empleado = dbGet('SELECT * FROM empleados WHERE id = ?', [req.params.id]);
   if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado.' });
   dbExec('DELETE FROM empleados WHERE id = ?', [empleado.id]);
+  res.json({ ok: true });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  OPERACIONES INUSUALES — Decreto Ejecutivo 35 de 2022 (paso previo al ROS)
+// ═════════════════════════════════════════════════════════════════════════════
+app.get('/api/inusuales', (req, res) => {
+  const cond = [];
+  const params = [];
+  if (req.query.clienteId) { cond.push('o.cliente_id = ?'); params.push(req.query.clienteId); }
+  if (req.query.estado)    { cond.push('o.estado = ?');     params.push(req.query.estado); }
+  const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
+  const rows = dbAll(
+    `SELECT o.*, c.nombre AS cliente_nombre FROM operaciones_inusuales o
+     LEFT JOIN clientes c ON c.id = o.cliente_id ${where} ORDER BY o.id DESC`,
+    params
+  );
+  res.json(rows);
+});
+
+app.get('/api/inusuales/:id', (req, res) => {
+  const row = dbGet(
+    `SELECT o.*, c.nombre AS cliente_nombre FROM operaciones_inusuales o
+     LEFT JOIN clientes c ON c.id = o.cliente_id WHERE o.id = ?`,
+    [req.params.id]
+  );
+  if (!row) return res.status(404).json({ error: 'Operación inusual no encontrada.' });
+  res.json(row);
+});
+
+app.post('/api/inusuales', (req, res) => {
+  const { clienteId, fechaDeteccion, tipoOperacion, monto, descripcion, detectadaPor, notas, usuario } = req.body;
+  const fechaD = (fechaDeteccion || '').trim();
+  const descT  = (descripcion || '').trim();
+  if (!fechaD) return res.status(400).json({ error: 'La fecha de detección es obligatoria.' });
+  if (!descT)  return res.status(400).json({ error: 'La descripción es obligatoria.' });
+
+  const id = dbInsert(
+    `INSERT INTO operaciones_inusuales
+       (cliente_id, fecha_deteccion, tipo_operacion, monto, descripcion, detectada_por, estado, notas, creado_por)
+     VALUES (?,?,?,?,?,?,'pendiente_analisis',?,?)`,
+    [
+      clienteId || null,
+      fechaD,
+      (tipoOperacion || '').trim() || null,
+      (monto || '').trim() || null,
+      descT,
+      (detectadaPor || '').trim() || null,
+      (notas || '').trim() || null,
+      (usuario || '').trim() || null,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM operaciones_inusuales WHERE id = ?', [id]));
+});
+
+// Analizar: descartar o escalar a ROS. Al escalar se crea el ROS automáticamente.
+app.put('/api/inusuales/:id', (req, res) => {
+  const op = dbGet('SELECT * FROM operaciones_inusuales WHERE id = ?', [req.params.id]);
+  if (!op) return res.status(404).json({ error: 'Operación inusual no encontrada.' });
+
+  const { estado, analisis, analizadaPor, notas } = req.body;
+  const { fecha, hora } = ahoraPA();
+  let rosId = op.ros_id;
+
+  // Si se escala a ROS y aún no existe, crear el ROS vinculado
+  if (estado === 'escalada_ros' && !op.ros_id) {
+    const fechaLimite = diasHabiles(op.fecha_deteccion + 'T00:00:00', 3);
+    rosId = dbInsert(
+      `INSERT INTO reportes_sospechosos
+         (cliente_id, fecha_deteccion, fecha_limite, descripcion, monto, tipo_operacion, reportado_por, notas, estado, creado_por)
+       VALUES (?,?,?,?,?,?,?,?,'borrador',?)`,
+      [
+        op.cliente_id || null,
+        op.fecha_deteccion,
+        fechaLimite,
+        `[Escalado de operación inusual #${op.id}] ${op.descripcion}` + (analisis ? ` — Análisis: ${analisis}` : ''),
+        op.monto,
+        op.tipo_operacion,
+        (analizadaPor || '').trim() || null,
+        op.notas,
+        (analizadaPor || '').trim() || null,
+      ]
+    );
+  }
+
+  dbExec(
+    `UPDATE operaciones_inusuales
+     SET estado = ?, analisis = ?, analizada_por = ?, fecha_analisis = ?, ros_id = ?, notas = ?
+     WHERE id = ?`,
+    [
+      estado ?? op.estado,
+      analisis ?? op.analisis,
+      (analizadaPor || '').trim() || op.analizada_por,
+      (estado === 'descartada' || estado === 'escalada_ros') ? `${fecha} ${hora}` : op.fecha_analisis,
+      rosId || null,
+      notas ?? op.notas,
+      op.id,
+    ]
+  );
+  res.json({ ...dbGet('SELECT * FROM operaciones_inusuales WHERE id = ?', [op.id]), rosCreado: rosId && !op.ros_id ? rosId : null });
+});
+
+app.delete('/api/inusuales/:id', (req, res) => {
+  const op = dbGet('SELECT * FROM operaciones_inusuales WHERE id = ?', [req.params.id]);
+  if (!op) return res.status(404).json({ error: 'Operación inusual no encontrada.' });
+  dbExec('DELETE FROM operaciones_inusuales WHERE id = ?', [op.id]);
+  res.json({ ok: true });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CONGELAMIENTO PREVENTIVO — Art. 41 Ley 23; Res. ONU 1267/1373/1718
+// ═════════════════════════════════════════════════════════════════════════════
+app.get('/api/congelamientos', (_req, res) => {
+  const rows = dbAll(
+    `SELECT g.*, c.nombre AS cliente_nombre FROM congelamientos g
+     LEFT JOIN clientes c ON c.id = g.cliente_id ORDER BY g.id DESC`
+  );
+  res.json(rows);
+});
+
+app.get('/api/congelamientos/:id', (req, res) => {
+  const row = dbGet(
+    `SELECT g.*, c.nombre AS cliente_nombre FROM congelamientos g
+     LEFT JOIN clientes c ON c.id = g.cliente_id WHERE g.id = ?`,
+    [req.params.id]
+  );
+  if (!row) return res.status(404).json({ error: 'Congelamiento no encontrado.' });
+  res.json(row);
+});
+
+app.post('/api/congelamientos', (req, res) => {
+  const { clienteId, nombrePersona, cedula, listaOrigen, referenciaLista, fechaDeteccion,
+          montoCongelado, descripcionBienes, notas, usuario } = req.body;
+  const nombreT = (nombrePersona || '').trim();
+  if (!nombreT) return res.status(400).json({ error: 'El nombre de la persona/entidad es obligatorio.' });
+  const { fecha } = ahoraPA();
+
+  const id = dbInsert(
+    `INSERT INTO congelamientos
+       (cliente_id, nombre_persona, cedula, lista_origen, referencia_lista, fecha_deteccion,
+        monto_congelado, descripcion_bienes, estado, notas, creado_por)
+     VALUES (?,?,?,?,?,?,?,?,'pendiente',?,?)`,
+    [
+      clienteId || null,
+      nombreT,
+      (cedula || '').trim() || null,
+      (listaOrigen || '').trim() || null,
+      (referenciaLista || '').trim() || null,
+      (fechaDeteccion || '').trim() || fecha,
+      (montoCongelado || '').trim() || null,
+      (descripcionBienes || '').trim() || null,
+      (notas || '').trim() || null,
+      (usuario || '').trim() || null,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM congelamientos WHERE id = ?', [id]));
+});
+
+app.put('/api/congelamientos/:id', (req, res) => {
+  const g = dbGet('SELECT * FROM congelamientos WHERE id = ?', [req.params.id]);
+  if (!g) return res.status(404).json({ error: 'Congelamiento no encontrado.' });
+  const { estado, fechaCongelamiento, montoCongelado, descripcionBienes, reportadoA,
+          fechaReporte, numeroRef, notas } = req.body;
+  dbExec(
+    `UPDATE congelamientos
+     SET estado = ?, fecha_congelamiento = ?, monto_congelado = ?, descripcion_bienes = ?,
+         reportado_a = ?, fecha_reporte = ?, numero_ref = ?, notas = ?
+     WHERE id = ?`,
+    [
+      estado ?? g.estado,
+      fechaCongelamiento ?? g.fecha_congelamiento,
+      montoCongelado ?? g.monto_congelado,
+      descripcionBienes ?? g.descripcion_bienes,
+      reportadoA ?? g.reportado_a,
+      fechaReporte ?? g.fecha_reporte,
+      numeroRef ?? g.numero_ref,
+      notas ?? g.notas,
+      g.id,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM congelamientos WHERE id = ?', [g.id]));
+});
+
+app.delete('/api/congelamientos/:id', (req, res) => {
+  const g = dbGet('SELECT * FROM congelamientos WHERE id = ?', [req.params.id]);
+  if (!g) return res.status(404).json({ error: 'Congelamiento no encontrado.' });
+  dbExec('DELETE FROM congelamientos WHERE id = ?', [g.id]);
   res.json({ ok: true });
 });
 

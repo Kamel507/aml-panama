@@ -35,7 +35,9 @@
     <button class="tab" data-tab="colaboradores">👷 Colaboradores</button>
     <button class="tab" data-tab="historial">📋 Historial</button>
     <button class="tab" data-tab="alertas">⚠ Alertas</button>
+    <button class="tab" data-tab="inusuales">🔎 Inusuales</button>
     <button class="tab" data-tab="ros">📋 ROS</button>
+    <button class="tab" data-tab="congelamiento">🧊 Congelamiento</button>
     <button class="tab" data-tab="estado">🛡 Listas y Cumplimiento</button>
   </nav>
 
@@ -862,6 +864,85 @@
     </section>
 
     <!-- ══════════════════════════════════════════
+         PESTAÑA: OPERACIONES INUSUALES (Decreto 35 de 2022)
+    ══════════════════════════════════════════════ -->
+    <section id="tab-inusuales" class="panel">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Operaciones Inusuales</h2>
+          <button id="btn-nueva-inusual" class="btn-primario btn-chico">+ Registrar operación inusual</button>
+        </div>
+        <p class="subtitulo">
+          Toda operación que se aparte del perfil del cliente debe registrarse y analizarse (Decreto Ejecutivo 35 de 2022). El análisis del Oficial decide si se <strong>descarta</strong> o se <strong>escala a ROS</strong>.
+        </p>
+
+        <div id="form-nueva-inusual-tarjeta" class="oculto ros-form-tarjeta">
+          <h3>Registrar Operación Inusual</h3>
+          <form id="form-nueva-inusual">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="inu-fecha">Fecha de detección <span class="campo-nota">(obligatorio)</span></label>
+                <input type="date" id="inu-fecha" required />
+              </div>
+              <div class="campo">
+                <label for="inu-cliente">Cliente / Proveedor vinculado</label>
+                <select id="inu-cliente"><option value="">— Sin vincular —</option></select>
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="inu-tipo">Tipo de operación</label>
+                <input type="text" id="inu-tipo" maxlength="120" placeholder="Ej: depósito en efectivo, transferencia…" />
+              </div>
+              <div class="campo">
+                <label for="inu-monto">Monto aproximado (USD)</label>
+                <input type="text" id="inu-monto" maxlength="50" placeholder="Ej: 15,000.00" />
+              </div>
+            </div>
+            <div class="campo" style="margin-bottom:14px">
+              <label for="inu-descripcion">¿Por qué es inusual? <span class="campo-nota">(obligatorio)</span></label>
+              <textarea id="inu-descripcion" required rows="3" maxlength="2000" placeholder="Describa el patrón que se aparta del perfil esperado del cliente…"></textarea>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="inu-detectada-por">Detectada por</label>
+                <input type="text" id="inu-detectada-por" maxlength="120" />
+              </div>
+              <div class="campo">
+                <label for="inu-notas">Notas</label>
+                <input type="text" id="inu-notas" maxlength="400" />
+              </div>
+            </div>
+            <div id="error-inusual" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Registrar</button>
+              <button type="button" id="btn-cancelar-inusual" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tabla-scroll" style="margin-top:16px">
+          <table class="tabla-historial">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Detección</th>
+                <th>Cliente</th>
+                <th>Tipo</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-inusuales">
+              <tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
          PESTAÑA: ROS
     ══════════════════════════════════════════════ -->
     <section id="tab-ros" class="panel">
@@ -944,6 +1025,100 @@
             </thead>
             <tbody id="tbody-ros">
               <tr><td colspan="8" class="cargando-msg">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: CONGELAMIENTO PREVENTIVO (Art. 41; Res. ONU 1267/1373/1718)
+    ══════════════════════════════════════════════ -->
+    <section id="tab-congelamiento" class="panel">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Congelamiento Preventivo de Fondos</h2>
+          <button id="btn-nuevo-congelamiento" class="btn-primario btn-chico">+ Registrar congelamiento</button>
+        </div>
+        <p class="subtitulo">
+          Ante una coincidencia con listas de sanciones de la ONU (Resoluciones 1267 / 1373 / 1718 — terrorismo y proliferación de armas), debe aplicarse <strong>congelamiento inmediato</strong> de los fondos y reportarse a la autoridad competente sin previo aviso al cliente (Art. 41, Ley 23 de 2015).
+        </p>
+
+        <div id="form-nuevo-congelamiento-tarjeta" class="oculto ros-form-tarjeta">
+          <h3>Registrar Congelamiento Preventivo</h3>
+          <form id="form-nuevo-congelamiento">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="con-nombre">Nombre de la persona / entidad <span class="campo-nota">(obligatorio)</span></label>
+                <input type="text" id="con-nombre" required maxlength="200" />
+              </div>
+              <div class="campo">
+                <label for="con-cedula">Cédula / Identificación</label>
+                <input type="text" id="con-cedula" maxlength="50" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="con-cliente">Cliente / Proveedor vinculado</label>
+                <select id="con-cliente"><option value="">— Sin vincular —</option></select>
+              </div>
+              <div class="campo">
+                <label for="con-lista">Lista de origen</label>
+                <select id="con-lista">
+                  <option value="ONU">ONU (Consejo de Seguridad)</option>
+                  <option value="OFAC">OFAC</option>
+                  <option value="UE">Unión Europea</option>
+                  <option value="Otra">Otra</option>
+                </select>
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="con-referencia">Referencia / Resolución</label>
+                <input type="text" id="con-referencia" maxlength="120" placeholder="Ej: Res. 1718, programa SDGT…" />
+              </div>
+              <div class="campo">
+                <label for="con-fecha">Fecha de detección</label>
+                <input type="date" id="con-fecha" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="con-monto">Monto / valor a congelar (USD)</label>
+                <input type="text" id="con-monto" maxlength="60" />
+              </div>
+              <div class="campo">
+                <label for="con-bienes">Descripción de bienes / fondos</label>
+                <input type="text" id="con-bienes" maxlength="200" />
+              </div>
+            </div>
+            <div class="campo" style="margin-bottom:14px">
+              <label for="con-notas">Notas</label>
+              <input type="text" id="con-notas" maxlength="400" />
+            </div>
+            <div id="error-congelamiento" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Registrar congelamiento</button>
+              <button type="button" id="btn-cancelar-congelamiento" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tabla-scroll" style="margin-top:16px">
+          <table class="tabla-historial">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Persona / Entidad</th>
+                <th>Lista</th>
+                <th>Detección</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-congelamientos">
+              <tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>
             </tbody>
           </table>
         </div>
