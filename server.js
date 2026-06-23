@@ -1030,6 +1030,97 @@ app.delete('/api/gafi/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Cálculo automático de riesgo y pendientes ───────────────────────────────
+const MESES_REVISION = { alto: 12, medio: 24, bajo: 36 };
+
+function calcularRiesgoCliente(cliente, historial, beneficiarios) {
+  const razones = [];
+  let nivel = 'bajo';
+
+  const conAlerta = historial.filter(h => h.coincidencia);
+  if (conAlerta.length > 0) {
+    razones.push(`Coincidencia en listas de sanciones en ${conAlerta.length} búsqueda(s) AML`);
+    nivel = 'alto';
+  }
+
+  const bfAlerta = beneficiarios.filter(b => b.coincidencia);
+  if (bfAlerta.length > 0) {
+    razones.push(`${bfAlerta.length} beneficiario(s) final(es) con coincidencia en listas (Art. 26-A)`);
+    nivel = 'alto';
+  }
+
+  if (cliente.nacionalidad) {
+    const gafi = chequearGAFI(cliente.nacionalidad);
+    if (gafi && gafi.coincide) {
+      razones.push(`País en lista ${gafi.lista === 'negra' ? 'NEGRA' : 'GRIS'} del GAFI: ${gafi.pais} (Art. 41)`);
+      nivel = 'alto';
+    }
+  }
+
+  const peps = pepEntries();
+  if (peps.length > 0 && (cliente.nombre || cliente.cedula)) {
+    const hits = buscarEnLista(peps, { nombre: cliente.nombre || '', cedula: cliente.cedula || '' });
+    if (hits.length > 0) {
+      razones.push('Cliente identificado como PEP o vinculado a PEP (Art. 34)');
+      nivel = 'alto';
+    }
+  }
+
+  if (nivel !== 'alto') {
+    if (cliente.tipo === 'juridica') {
+      razones.push('Persona jurídica — riesgo inherente medio (Art. 26-B)');
+      nivel = 'medio';
+    } else {
+      razones.push('Persona natural sin indicadores de riesgo detectados');
+    }
+  }
+
+  const meses = MESES_REVISION[nivel] || 36;
+  const baseISO = historial.length > 0 ? historial[0].creado_en : (cliente.creado_en || new Date().toISOString());
+  const base = new Date(baseISO);
+  const proxima = new Date(base);
+  proxima.setMonth(proxima.getMonth() + meses);
+  const diasRestantes = Math.ceil((proxima - new Date()) / 86400000);
+
+  return {
+    nivel,
+    razones,
+    ultimaRevision : base.toISOString().split('T')[0],
+    proximaRevision: proxima.toISOString().split('T')[0],
+    frecuenciaMeses: meses,
+    diasRestantes,
+    vencido       : diasRestantes < 0,
+    proximoVencer : diasRestantes >= 0 && diasRestantes <= 30,
+  };
+}
+
+function calcularPendientes(cliente, documentos, beneficiarios, riesgo) {
+  const items = [];
+  if (!cliente.cedula)              items.push({ tipo: 'campo',       msg: 'Falta número de cédula / RUC' });
+  if (!cliente.nacionalidad)        items.push({ tipo: 'campo',       msg: 'Falta país / nacionalidad' });
+  if (!cliente.actividad_economica) items.push({ tipo: 'campo',       msg: 'Falta actividad económica (Art. 40)' });
+  if (!cliente.origen_fondos)       items.push({ tipo: 'campo',       msg: 'Falta declaración de origen de fondos (Art. 26)' });
+
+  if (documentos.length === 0) {
+    items.push({ tipo: 'documento', msg: 'Sin documentos subidos al expediente' });
+  } else {
+    if (!documentos.some(d => ['cedula','pasaporte'].includes(d.tipo_documento)))
+      items.push({ tipo: 'documento', msg: 'Falta copia de documento de identidad (cédula o pasaporte)' });
+    if (cliente.tipo === 'juridica' && !documentos.some(d => d.tipo_documento === 'pacto_social'))
+      items.push({ tipo: 'documento', msg: 'Falta pacto social / escritura de constitución (Art. 28)' });
+  }
+
+  if (cliente.tipo === 'juridica' && beneficiarios.length === 0)
+    items.push({ tipo: 'beneficiario', msg: 'Sin beneficiarios finales registrados (Art. 26-A y 28)' });
+
+  if (riesgo.vencido)
+    items.push({ tipo: 'revision', msg: `Revisión AML vencida hace ${Math.abs(riesgo.diasRestantes)} días — frecuencia requerida: cada ${riesgo.frecuenciaMeses} meses` });
+  else if (riesgo.proximoVencer)
+    items.push({ tipo: 'revision', msg: `Revisión AML vence en ${riesgo.diasRestantes} día(s) — límite: ${riesgo.proximaRevision}` });
+
+  return items;
+}
+
 // ─── API: Expedientes de clientes ──────────────────────────────────────────────
 app.get('/api/clientes', (req, res) => {
   const q = (req.query.buscar || '').trim();
@@ -1053,12 +1144,19 @@ app.get('/api/clientes/:id', (req, res) => {
   );
   const historial = dbAll(
     `SELECT id, fecha, hora, nombre, cedula, pais, usuario, coincidencia,
-            resultado_onu, resultado_ofac, resultado_ue, resultado_pep, resultado_gafi
+            resultado_onu, resultado_ofac, resultado_ue, resultado_pep, resultado_gafi, creado_en
      FROM consultas WHERE cliente_id = ? ORDER BY id DESC`,
     [cliente.id]
   );
+  const beneficiarios = dbAll(
+    'SELECT * FROM beneficiarios_finales WHERE cliente_id = ? ORDER BY id',
+    [cliente.id]
+  );
 
-  res.json({ cliente, documentos, historial });
+  const riesgoCalculado = calcularRiesgoCliente(cliente, historial, beneficiarios);
+  const pendientes      = calcularPendientes(cliente, documentos, beneficiarios, riesgoCalculado);
+
+  res.json({ cliente, documentos, historial, beneficiarios, riesgoCalculado, pendientes });
 });
 
 app.post('/api/clientes', (req, res) => {
@@ -1515,6 +1613,29 @@ function verificarEspacio(doc, y, necesario) {
     doc.y = 60;
   }
 }
+
+// ─── API: Dashboard de alertas y pendientes ──────────────────────────────────
+app.get('/api/alertas', (_req, res) => {
+  const clientes = dbAll('SELECT * FROM clientes ORDER BY nombre');
+  const resultado = clientes.map(c => {
+    const documentos    = dbAll('SELECT tipo_documento FROM documentos_cliente WHERE cliente_id = ?', [c.id]);
+    const historial     = dbAll(
+      'SELECT id, coincidencia, creado_en FROM consultas WHERE cliente_id = ? ORDER BY id DESC',
+      [c.id]
+    );
+    const beneficiarios = dbAll('SELECT coincidencia FROM beneficiarios_finales WHERE cliente_id = ?', [c.id]);
+    const riesgo        = calcularRiesgoCliente(c, historial, beneficiarios);
+    const pendientes    = calcularPendientes(c, documentos, beneficiarios, riesgo);
+    return { id: c.id, nombre: c.nombre, tipo: c.tipo, riesgoCalculado: riesgo, pendientes };
+  });
+
+  resultado.sort((a, b) => {
+    const score = r => (r.riesgoCalculado.vencido ? 3 : r.riesgoCalculado.proximoVencer ? 2 : 0) + r.pendientes.length * 0.1;
+    return score(b) - score(a);
+  });
+
+  res.json(resultado);
+});
 
 // ─── Manejo de errores (multer / destinos inválidos) ──────────────────────────
 app.use((err, _req, res, _next) => {

@@ -13,6 +13,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     btn.classList.add('activo');
     document.getElementById(`tab-${id}`).classList.add('activo');
     if (id === 'historial') cargarHistorial();
+    if (id === 'alertas')   cargarAlertas();
     if (id === 'estado')    { cargarEstadoListas(); cargarPep(); cargarGafi(); }
     if (id === 'clientes')  mostrarVistaListaClientes();
   });
@@ -587,14 +588,14 @@ async function abrirFichaCliente(id) {
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el cliente.');
 
     clienteEnFicha = data.cliente;
-    renderizarFicha(data.cliente, data.documentos, data.historial);
+    renderizarFicha(data.cliente, data.documentos, data.historial, data.beneficiarios || [], data.riesgoCalculado, data.pendientes || []);
     mostrarVistaFichaCliente();
   } catch (err) {
     alert(`Error: ${err.message}`);
   }
 }
 
-function renderizarFicha(cliente, documentos, historial) {
+function renderizarFicha(cliente, documentos, historial, beneficiarios, riesgoCalculado, pendientes) {
   document.getElementById('ficha-nombre').textContent = cliente.nombre;
   document.getElementById('ficha-cedula').textContent = cliente.cedula || '—';
   document.getElementById('ficha-tipo').textContent = cliente.tipo === 'juridica' ? 'Persona jurídica' : 'Persona natural';
@@ -602,15 +603,7 @@ function renderizarFicha(cliente, documentos, historial) {
   document.getElementById('ficha-fecha-nacimiento').textContent = cliente.fecha_nacimiento || '—';
   document.getElementById('ficha-creado').textContent = cliente.creado_en || '—';
 
-  const RIESGO_LABELS = { bajo: 'Bajo', medio: 'Medio', alto: 'Alto — Diligencia Ampliada', pendiente: 'Pendiente' };
-  const RIESGO_CLASES = { bajo: 'badge-riesgo--bajo', medio: 'badge-riesgo--medio', alto: 'badge-riesgo--alto', pendiente: 'badge-riesgo--pendiente' };
-  const nivel = cliente.nivel_riesgo || 'pendiente';
-  const badgeEl = document.getElementById('ficha-nivel-riesgo');
-  badgeEl.textContent = RIESGO_LABELS[nivel] || nivel;
-  badgeEl.className = `badge-riesgo ${RIESGO_CLASES[nivel] || 'badge-riesgo--pendiente'}`;
-
-  const actEl = document.getElementById('ficha-actividad-economica');
-  actEl.textContent = cliente.actividad_economica ? `· ${cliente.actividad_economica}` : '';
+  renderizarAnalisisRiesgo(cliente, riesgoCalculado, pendientes);
 
   document.getElementById('form-editar-cliente').classList.add('oculto');
 
@@ -844,6 +837,166 @@ fileDoc.addEventListener('change', async () => {
     cargando.querySelector('p').textContent = 'Consultando listas de sanciones internacionales…';
   }
 });
+
+// ── Análisis de Riesgo Automático (Art. 26-B) ────────────────────────────────
+const RIESGO_LABELS = { bajo: 'Bajo', medio: 'Medio', alto: 'Alto — Diligencia Ampliada', pendiente: 'Pendiente' };
+const RIESGO_CLASES = { bajo: 'badge-riesgo--bajo', medio: 'badge-riesgo--medio', alto: 'badge-riesgo--alto', pendiente: 'badge-riesgo--pendiente' };
+const PENDIENTE_ICONOS = { campo: '📋', documento: '📄', beneficiario: '👥', revision: '🔔' };
+
+function renderizarAnalisisRiesgo(cliente, rc, pendientes) {
+  if (!rc) return;
+
+  // Badge calculado
+  const badgeEl = document.getElementById('riesgo-calculado-badge');
+  badgeEl.textContent = RIESGO_LABELS[rc.nivel] || rc.nivel;
+  badgeEl.className = `badge-riesgo ${RIESGO_CLASES[rc.nivel] || 'badge-riesgo--pendiente'}`;
+
+  // Razones
+  const razonesEl = document.getElementById('riesgo-razones');
+  razonesEl.innerHTML = (rc.razones || []).map(r => `<li>${esc(r)}</li>`).join('');
+
+  // Select confirmado
+  const selectEl = document.getElementById('ec-nivel-riesgo-ficha');
+  selectEl.value = cliente.nivel_riesgo || 'pendiente';
+  const infoEl = document.getElementById('riesgo-confirmado-info');
+  infoEl.textContent = cliente.nivel_riesgo && cliente.nivel_riesgo !== 'pendiente'
+    ? `Confirmado: ${RIESGO_LABELS[cliente.nivel_riesgo]}`
+    : 'Aún sin confirmar por el Oficial';
+
+  // Timeline de revisión
+  document.getElementById('revision-ultima').textContent     = rc.ultimaRevision || '—';
+  document.getElementById('revision-proxima').textContent    = rc.proximaRevision || '—';
+  document.getElementById('revision-frecuencia').textContent = `Cada ${rc.frecuenciaMeses} meses (riesgo ${rc.nivel})`;
+
+  const estadoEl = document.getElementById('revision-estado');
+  const barraEl  = document.getElementById('revision-progreso-barra');
+  if (rc.vencido) {
+    estadoEl.textContent  = `⚠ Vencida hace ${Math.abs(rc.diasRestantes)} días`;
+    estadoEl.className    = 'revision-valor texto-error';
+    barraEl.style.width   = '100%';
+    barraEl.className     = 'revision-progreso-barra barra-vencida';
+  } else if (rc.proximoVencer) {
+    estadoEl.textContent  = `⚠ Vence en ${rc.diasRestantes} días`;
+    estadoEl.className    = 'revision-valor texto-warn';
+    const pct = Math.round((1 - rc.diasRestantes / (rc.frecuenciaMeses * 30)) * 100);
+    barraEl.style.width   = `${Math.min(pct, 100)}%`;
+    barraEl.className     = 'revision-progreso-barra barra-proxima';
+  } else {
+    estadoEl.textContent  = `✓ Al día — faltan ${rc.diasRestantes} días`;
+    estadoEl.className    = 'revision-valor texto-ok';
+    const pct = Math.round((1 - rc.diasRestantes / (rc.frecuenciaMeses * 30)) * 100);
+    barraEl.style.width   = `${Math.max(pct, 4)}%`;
+    barraEl.className     = 'revision-progreso-barra barra-ok';
+  }
+
+  // Pendientes
+  const listEl = document.getElementById('pendientes-lista');
+  if (!pendientes || !pendientes.length) {
+    listEl.innerHTML = '<p class="pendientes-ok">✓ Sin pendientes — expediente completo</p>';
+  } else {
+    listEl.innerHTML = `
+      <div class="pendientes-titulo">Pendientes del expediente (${pendientes.length})</div>
+      ${pendientes.map(p => `
+        <div class="pendiente-item pendiente-${p.tipo}">
+          <span class="pendiente-icono">${PENDIENTE_ICONOS[p.tipo] || '•'}</span>
+          <span>${esc(p.msg)}</span>
+        </div>`).join('')}`;
+  }
+}
+
+document.getElementById('btn-confirmar-riesgo').addEventListener('click', async () => {
+  if (!clienteEnFicha) return;
+  const nivel = document.getElementById('ec-nivel-riesgo-ficha').value;
+  try {
+    const res  = await fetch(`/api/clientes/${clienteEnFicha.id}`, {
+      method : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ nivelRiesgo: nivel }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar.');
+    clienteEnFicha = data;
+    const infoEl = document.getElementById('riesgo-confirmado-info');
+    infoEl.textContent = `Confirmado: ${RIESGO_LABELS[nivel] || nivel}`;
+    infoEl.style.color = 'var(--verde)';
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+});
+
+// ── Panel de Alertas ──────────────────────────────────────────────────────────
+async function cargarAlertas() {
+  const cont = document.getElementById('alertas-contenedor');
+  cont.innerHTML = '<p class="cargando-msg">Calculando alertas…</p>';
+  try {
+    const res  = await fetch('/api/alertas');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cargar alertas.');
+
+    if (!data.length) {
+      cont.innerHTML = '<p class="cargando-msg">No hay clientes registrados.</p>';
+      return;
+    }
+
+    const sinAlertas = data.filter(c => !c.riesgoCalculado.vencido && !c.riesgoCalculado.proximoVencer && c.pendientes.length === 0);
+    const conAlertas = data.filter(c => c.riesgoCalculado.vencido || c.riesgoCalculado.proximoVencer || c.pendientes.length > 0);
+
+    let html = '';
+
+    if (conAlertas.length) {
+      html += conAlertas.map(c => {
+        const rc = c.riesgoCalculado;
+        const estadoClase = rc.vencido ? 'alerta-card--vencido' : rc.proximoVencer ? 'alerta-card--proximo' : 'alerta-card--pendiente';
+        const estadoTxt   = rc.vencido
+          ? `⚠ Revisión vencida hace ${Math.abs(rc.diasRestantes)} días`
+          : rc.proximoVencer
+          ? `⚠ Revisión vence en ${rc.diasRestantes} días`
+          : '';
+
+        return `
+          <div class="alerta-card ${estadoClase}">
+            <div class="alerta-card-header">
+              <div>
+                <span class="alerta-nombre">${esc(c.nombre)}</span>
+                <span class="badge-riesgo ${RIESGO_CLASES[rc.nivel] || 'badge-riesgo--pendiente'}" style="margin-left:10px">${RIESGO_LABELS[rc.nivel]}</span>
+                <span class="alerta-tipo">${c.tipo === 'juridica' ? 'Jurídica' : 'Natural'}</span>
+              </div>
+              <div class="alerta-header-right">
+                ${estadoTxt ? `<span class="alerta-estado-txt">${estadoTxt}</span>` : ''}
+                <button class="btn-secundario btn-chico btn-ir-ficha" data-id="${c.id}">Ver ficha →</button>
+              </div>
+            </div>
+            ${c.pendientes.length ? `
+              <ul class="alerta-pendientes">
+                ${c.pendientes.map(p => `<li class="pendiente-item pendiente-${p.tipo}"><span class="pendiente-icono">${PENDIENTE_ICONOS[p.tipo]}</span> ${esc(p.msg)}</li>`).join('')}
+              </ul>` : ''}
+            <div class="alerta-revision">Próxima revisión: <strong>${rc.proximaRevision}</strong> · Frecuencia: cada ${rc.frecuenciaMeses} meses</div>
+          </div>`;
+      }).join('');
+    }
+
+    if (sinAlertas.length) {
+      html += `<details class="alertas-ok-grupo">
+        <summary>✓ ${sinAlertas.length} cliente(s) sin pendientes</summary>
+        <ul class="alertas-ok-lista">
+          ${sinAlertas.map(c => `<li>${esc(c.nombre)} — próxima revisión: ${c.riesgoCalculado.proximaRevision}</li>`).join('')}
+        </ul>
+      </details>`;
+    }
+
+    cont.innerHTML = html;
+    cont.querySelectorAll('.btn-ir-ficha').forEach(btn =>
+      btn.addEventListener('click', () => {
+        activarTab('clientes');
+        setTimeout(() => abrirFichaCliente(btn.dataset.id), 50);
+      })
+    );
+  } catch (err) {
+    cont.innerHTML = `<p class="cargando-msg">Error: ${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('btn-actualizar-alertas').addEventListener('click', cargarAlertas);
 
 // ── Beneficiarios Finales (Art. 26-A y 28, Ley 23 de 2015) ───────────────────
 async function cargarBeneficiarios(clienteId) {

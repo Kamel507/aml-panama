@@ -32,6 +32,7 @@
     <button class="tab activo" data-tab="consulta">🔍 Nueva Consulta</button>
     <button class="tab" data-tab="clientes">👤 Clientes</button>
     <button class="tab" data-tab="historial">📋 Historial</button>
+    <button class="tab" data-tab="alertas">⚠ Alertas</button>
     <button class="tab" data-tab="estado">🛡 Listas y Cumplimiento</button>
   </nav>
 
@@ -316,11 +317,6 @@
             <div><strong>Creado:</strong> <span id="ficha-creado">—</span></div>
           </div>
 
-          <div class="perfil-riesgo-fila">
-            <span class="perfil-riesgo-label">Nivel de riesgo (Art. 26-B):</span>
-            <span id="ficha-nivel-riesgo" class="badge-riesgo badge-riesgo--pendiente">Pendiente</span>
-            <span class="perfil-riesgo-detalle" id="ficha-actividad-economica"></span>
-          </div>
 
           <button id="btn-editar-cliente" class="btn-secundario btn-chico">✎ Editar datos</button>
 
@@ -393,6 +389,56 @@
               <button type="button" id="btn-cancelar-editar-cliente" class="btn-secundario">Cancelar</button>
             </div>
           </form>
+        </div>
+
+        <!-- Análisis de Riesgo Automático (Art. 26-B) -->
+        <div class="tarjeta tarjeta-riesgo" id="card-analisis-riesgo">
+          <h2>Análisis de Riesgo — Art. 26-B, Ley 23 de 2015</h2>
+
+          <div class="riesgo-grid">
+            <div class="riesgo-bloque">
+              <div class="riesgo-bloque-titulo">Calculado por el sistema</div>
+              <span id="riesgo-calculado-badge" class="badge-riesgo badge-riesgo--pendiente">—</span>
+              <ul id="riesgo-razones" class="riesgo-razones"></ul>
+            </div>
+            <div class="riesgo-bloque">
+              <div class="riesgo-bloque-titulo">Confirmado por el Oficial de Cumplimiento</div>
+              <select id="ec-nivel-riesgo-ficha" class="select-riesgo-ficha">
+                <option value="pendiente">Pendiente de confirmación</option>
+                <option value="bajo">Bajo</option>
+                <option value="medio">Medio</option>
+                <option value="alto">Alto — Diligencia Ampliada</option>
+              </select>
+              <button id="btn-confirmar-riesgo" class="btn-primario btn-chico" style="margin-top:8px">✓ Confirmar nivel</button>
+              <p id="riesgo-confirmado-info" class="riesgo-confirmado-info"></p>
+            </div>
+          </div>
+
+          <div class="revision-timeline" id="revision-timeline">
+            <div class="revision-items">
+              <div class="revision-item">
+                <span class="revision-label">Última revisión AML</span>
+                <span id="revision-ultima" class="revision-valor">—</span>
+              </div>
+              <div class="revision-item">
+                <span class="revision-label">Próxima revisión requerida</span>
+                <span id="revision-proxima" class="revision-valor">—</span>
+              </div>
+              <div class="revision-item">
+                <span class="revision-label">Frecuencia</span>
+                <span id="revision-frecuencia" class="revision-valor">—</span>
+              </div>
+              <div class="revision-item">
+                <span class="revision-label">Estado</span>
+                <span id="revision-estado" class="revision-valor">—</span>
+              </div>
+            </div>
+            <div class="revision-progreso-contenedor">
+              <div class="revision-progreso-barra" id="revision-progreso-barra"></div>
+            </div>
+          </div>
+
+          <div id="pendientes-lista" class="pendientes-lista"></div>
         </div>
 
         <!-- Documentos del cliente -->
@@ -505,6 +551,25 @@
         </div>
       </div>
 
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: ALERTAS
+    ══════════════════════════════════════════════ -->
+    <section id="tab-alertas" class="panel">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Panel de Alertas y Pendientes</h2>
+          <button id="btn-actualizar-alertas" class="btn-secundario">↻ Actualizar</button>
+        </div>
+        <p class="subtitulo">
+          Clientes con revisión AML vencida, próxima a vencer o con información incompleta según la Ley 23 de 2015.
+          Frecuencias: Alto riesgo = 12 meses · Medio = 24 meses · Bajo = 36 meses.
+        </p>
+        <div id="alertas-contenedor">
+          <p class="cargando-msg">Cargando alertas…</p>
+        </div>
+      </div>
     </section>
 
     <!-- ══════════════════════════════════════════
