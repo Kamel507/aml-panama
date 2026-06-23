@@ -965,3 +965,67 @@ body {
 }
 .alertas-ok-lista li { padding: 3px 0; border-bottom: 1px solid var(--verde-borde); }
 .alertas-ok-lista li:last-child { border-bottom: none; }
+/* ── Aprobación de Alta Gerencia ────────────────────────── */
+.tarjeta-aprobacion { border-left: 5px solid var(--rojo); background: #fff8f8; }
+.aprobacion-resumen { padding: 10px 14px; background: var(--gris); border-radius: var(--radio); margin-bottom: 16px; }
+.form-aprobacion    { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── ROS — item en ficha ─────────────────────────────────── */
+.ros-item {
+  border: 1px solid var(--gris-borde);
+  border-radius: var(--radio);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  border-left: 4px solid #F9A825;
+  background: #fffbf0;
+}
+.ros-item-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.ros-tipo        { font-weight: 600; color: var(--texto); }
+.ros-monto       { color: var(--azul); font-weight: 600; }
+.ros-descripcion { font-size: 0.88rem; color: var(--texto-sub); margin: 6px 0; }
+.ros-acciones    { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.badge-ros                 { font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+.badge-ros--borrador       { background: #FFF3CD; color: #856404; border: 1px solid #F9A825; }
+.badge-ros--reportado      { background: var(--verde-claro); color: var(--verde); border: 1px solid var(--verde-borde); }
+
+/* ── Conservación (Art. 38) ─────────────────────────────── */
+.conservacion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.conservacion-grid > div {
+  background: var(--gris);
+  border-radius: var(--radio);
+  padding: 10px 14px;
+}
+
+/* ── Multi-BF en nuevo cliente ──────────────────────────── */
+.nc-bf-fila {
+  border: 1px solid var(--gris-borde);
+  border-radius: var(--radio);
+  padding: 14px;
+  margin-bottom: 10px;
+  background: var(--gris);
+}
+#nc-progreso {
+  background: var(--azul-bg);
+  border: 1px solid var(--azul-claro);
+  color: var(--azul);
+  padding: 10px 16px;
+  border-radius: var(--radio);
+  font-size: 0.9rem;
+  margin-top: 10px;
+}
+
+/* ── Pendientes — aprobacion y conservacion ─────────────── */
+.pendiente-aprobacion { background: #FFF0F0; border-left: 3px solid var(--rojo); }
+.pendiente-conservacion { background: #F0FFF4; border-left: 3px solid var(--verde); }

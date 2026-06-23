@@ -33,6 +33,7 @@
     <button class="tab" data-tab="clientes">👤 Clientes</button>
     <button class="tab" data-tab="historial">📋 Historial</button>
     <button class="tab" data-tab="alertas">⚠ Alertas</button>
+    <button class="tab" data-tab="ros">📋 ROS</button>
     <button class="tab" data-tab="estado">🛡 Listas y Cumplimiento</button>
   </nav>
 
@@ -286,13 +287,57 @@
                 <input type="text" id="nc-fecha-nacimiento" placeholder="DD/MM/AAAA" maxlength="20" />
               </div>
               <div class="campo">
-                <label for="nc-notas">Notas</label>
-                <input type="text" id="nc-notas" maxlength="300" />
+                <label for="nc-direccion">Dirección (Art. 23)</label>
+                <input type="text" id="nc-direccion" maxlength="300" />
               </div>
             </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="nc-actividad">Actividad económica (Art. 40)</label>
+                <input type="text" id="nc-actividad" maxlength="200" placeholder="Ej: Comercio, servicios financieros…" />
+              </div>
+              <div class="campo">
+                <label for="nc-origen-fondos">Origen de fondos (Art. 26)</label>
+                <input type="text" id="nc-origen-fondos" maxlength="200" placeholder="Ej: Ingresos por ventas, herencia…" />
+              </div>
+            </div>
+
+            <!-- Campos solo para jurídica -->
+            <div id="nc-campos-juridica" class="oculto">
+              <div class="campos-fila">
+                <div class="campo">
+                  <label for="nc-representante">Representante legal / Apoderado (Art. 28)</label>
+                  <input type="text" id="nc-representante" maxlength="200" />
+                </div>
+                <div class="campo">
+                  <label for="nc-notas">Notas</label>
+                  <input type="text" id="nc-notas" maxlength="300" />
+                </div>
+              </div>
+
+              <div class="bf-seccion-nueva" id="nc-bf-seccion">
+                <div class="bf-seccion-titulo">
+                  Beneficiarios Finales (Art. 26-A y 28)
+                  <button type="button" id="btn-agregar-bf-fila" class="btn-secundario btn-chico">+ Agregar</button>
+                </div>
+                <p class="subtitulo" style="margin-bottom:10px">Personas naturales con ≥ 25% de participación o control efectivo. Se verificarán en listas AML al guardar.</p>
+                <div id="nc-bf-filas"></div>
+              </div>
+            </div>
+
+            <div id="nc-campos-natural" class="">
+              <div class="campos-fila">
+                <div class="campo">
+                  <label for="nc-notas-natural">Notas</label>
+                  <input type="text" id="nc-notas-natural" maxlength="300" />
+                </div>
+              </div>
+            </div>
+
             <div id="error-nuevo-cliente" class="mensaje-error oculto"></div>
+            <div id="nc-progreso" class="mensaje-info oculto"></div>
             <div class="acciones-formulario">
-              <button type="submit" class="btn-primario">Crear Ficha de Cliente</button>
+              <button type="submit" id="btn-crear-cliente" class="btn-primario">Crear Ficha de Cliente</button>
               <button type="button" id="btn-cancelar-nuevo-cliente" class="btn-secundario">Cancelar</button>
             </div>
           </form>
@@ -314,6 +359,8 @@
             <div><strong>Tipo:</strong> <span id="ficha-tipo">—</span></div>
             <div><strong>Nacionalidad:</strong> <span id="ficha-nacionalidad">—</span></div>
             <div><strong>Fecha nacimiento/constitución:</strong> <span id="ficha-fecha-nacimiento">—</span></div>
+            <div><strong>Dirección:</strong> <span id="ficha-direccion">—</span></div>
+            <div><strong>Representante legal:</strong> <span id="ficha-representante">—</span></div>
             <div><strong>Creado:</strong> <span id="ficha-creado">—</span></div>
           </div>
 
@@ -352,6 +399,23 @@
               <div class="campo">
                 <label for="ec-notas">Notas</label>
                 <input type="text" id="ec-notas" maxlength="300" />
+              </div>
+            </div>
+
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ec-direccion">Dirección (Art. 23)</label>
+                <input type="text" id="ec-direccion" maxlength="300" />
+              </div>
+              <div class="campo">
+                <label for="ec-representante">Representante legal / Apoderado (Art. 28)</label>
+                <input type="text" id="ec-representante" maxlength="200" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ec-fecha-fin">Fecha fin de relación comercial <span class="campo-nota">(Art. 38 — inicia contador 5 años)</span></label>
+                <input type="date" id="ec-fecha-fin" />
               </div>
             </div>
 
@@ -465,6 +529,52 @@
           </div>
         </div>
 
+        <!-- Aprobación de Alta Gerencia (Art. 26) — visible solo cuando nivel alto -->
+        <div class="tarjeta tarjeta-aprobacion oculto" id="card-aprobacion">
+          <h2>Aprobación de Alta Gerencia — Art. 26, Ley 23 de 2015</h2>
+          <p class="subtitulo">Cliente de <strong>alto riesgo</strong>: se requiere autorización formal de la alta gerencia antes de iniciar o continuar la relación comercial.</p>
+          <div class="aprobacion-estado-bloque" id="aprobacion-estado-bloque"></div>
+          <form id="form-aprobacion" class="form-aprobacion">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="apr-estado">Decisión</label>
+                <select id="apr-estado">
+                  <option value="pendiente">Pendiente de revisión</option>
+                  <option value="aprobada">Aprobada — relación autorizada</option>
+                  <option value="rechazada">Rechazada — relación NO debe continuar</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label for="apr-por">Aprobado / rechazado por</label>
+                <input type="text" id="apr-por" maxlength="120" placeholder="Nombre del Director / Gerente" />
+              </div>
+            </div>
+            <div class="campo" style="margin-bottom:12px">
+              <label for="apr-notas">Notas / justificación</label>
+              <input type="text" id="apr-notas" maxlength="500" />
+            </div>
+            <button type="submit" class="btn-primario btn-chico">Guardar decisión de gerencia</button>
+          </form>
+        </div>
+
+        <!-- ROS de este cliente (Art. 42) -->
+        <div class="tarjeta" id="card-ros-cliente">
+          <div class="historial-header">
+            <h2>Reportes de Operaciones Sospechosas — ROS (Art. 42)</h2>
+            <button id="btn-nuevo-ros-cliente" class="btn-primario btn-chico">+ Nuevo ROS</button>
+          </div>
+          <p class="subtitulo">Plazo legal: 3 días hábiles desde la detección para reportar a la UAF.</p>
+          <div id="lista-ros-cliente">
+            <p class="cargando-msg">Cargando…</p>
+          </div>
+        </div>
+
+        <!-- Conservación de Registros (Art. 38) -->
+        <div class="tarjeta" id="card-conservacion">
+          <h2>Conservación de Registros — Art. 38, Ley 23 de 2015</h2>
+          <div class="conservacion-info" id="conservacion-info"></div>
+        </div>
+
         <!-- Beneficiarios Finales — Art. 26-A y 28, Ley 23 de 2015 (solo jurídicas) -->
         <div class="tarjeta" id="card-beneficiarios">
           <h2>Beneficiarios Finales (Socios/Accionistas) <small class="subtitulo-legal">Art. 26-A y 28, Ley 23 de 2015</small></h2>
@@ -551,6 +661,95 @@
         </div>
       </div>
 
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: ROS
+    ══════════════════════════════════════════════ -->
+    <section id="tab-ros" class="panel">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Reportes de Operaciones Sospechosas — ROS (Art. 42, Ley 23 de 2015)</h2>
+          <button id="btn-nuevo-ros" class="btn-primario btn-chico">+ Nuevo ROS</button>
+        </div>
+        <p class="subtitulo">
+          Toda operación sospechosa debe reportarse a la UAF dentro de <strong>3 días hábiles</strong> desde su detección (Art. 42). El reporte es confidencial — no debe alertarse al cliente.
+        </p>
+
+        <div id="form-nuevo-ros-tarjeta" class="oculto ros-form-tarjeta">
+          <h3>Nuevo Reporte de Operación Sospechosa</h3>
+          <form id="form-nuevo-ros">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ros-fecha-deteccion">Fecha de detección <span class="campo-nota">(obligatorio)</span></label>
+                <input type="date" id="ros-fecha-deteccion" required />
+              </div>
+              <div class="campo">
+                <label for="ros-cliente">Cliente vinculado <span class="campo-nota">(opcional)</span></label>
+                <select id="ros-cliente"><option value="">— Sin vincular —</option></select>
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ros-tipo">Tipo de operación</label>
+                <select id="ros-tipo">
+                  <option value="">— Seleccione —</option>
+                  <option value="transferencia">Transferencia inusual</option>
+                  <option value="efectivo">Operación en efectivo</option>
+                  <option value="estructuracion">Estructuración (smurfing)</option>
+                  <option value="identidad_falsa">Identidad falsa o suplantación</option>
+                  <option value="lavado">Posible lavado de activos</option>
+                  <option value="terrorismo">Posible financiamiento del terrorismo</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label for="ros-monto">Monto aproximado (USD)</label>
+                <input type="text" id="ros-monto" placeholder="Ej: 25,000.00" maxlength="50" />
+              </div>
+            </div>
+            <div class="campo" style="margin-bottom:16px">
+              <label for="ros-descripcion">Descripción de la operación sospechosa <span class="campo-nota">(obligatorio)</span></label>
+              <textarea id="ros-descripcion" required rows="4" maxlength="2000" placeholder="Describa con detalle la operación, los patrones inusuales observados y las razones que la hacen sospechosa…"></textarea>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ros-reportado-por">Reportado por (Oficial de Cumplimiento)</label>
+                <input type="text" id="ros-reportado-por" maxlength="120" />
+              </div>
+              <div class="campo">
+                <label for="ros-notas">Notas internas</label>
+                <input type="text" id="ros-notas" maxlength="500" />
+              </div>
+            </div>
+            <div id="error-ros" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Crear ROS (borrador)</button>
+              <button type="button" id="btn-cancelar-ros" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="tabla-ros-contenedor" class="tabla-scroll" style="margin-top:16px">
+          <table class="tabla-historial">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Detección</th>
+                <th>Límite UAF</th>
+                <th>Cliente</th>
+                <th>Tipo</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-ros">
+              <tr><td colspan="8" class="cargando-msg">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- ══════════════════════════════════════════

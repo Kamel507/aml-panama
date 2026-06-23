@@ -14,6 +14,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.getElementById(`tab-${id}`).classList.add('activo');
     if (id === 'historial') cargarHistorial();
     if (id === 'alertas')   cargarAlertas();
+    if (id === 'ros')       { cargarROS(); cargarSelectClientesROS(); }
     if (id === 'estado')    { cargarEstadoListas(); cargarPep(); cargarGafi(); }
     if (id === 'clientes')  mostrarVistaListaClientes();
   });
@@ -548,19 +549,64 @@ document.getElementById('btn-cancelar-nuevo-cliente').addEventListener('click', 
   document.getElementById('form-nuevo-cliente').reset();
 });
 
+// ── Nuevo cliente: mostrar/ocultar campos según tipo ──────────────────────────
+document.getElementById('nc-tipo').addEventListener('change', function () {
+  const esJuridica = this.value === 'juridica';
+  const secJur = document.getElementById('nc-campos-juridica');
+  const secNat = document.getElementById('nc-campos-natural');
+  if (secJur) secJur.classList.toggle('oculto', !esJuridica);
+  if (secNat) secNat.classList.toggle('oculto', esJuridica);
+});
+
+// ── Agregar filas de beneficiario en formulario nuevo cliente ─────────────────
+let _ncBfCount = 0;
+const btnAgregarBfFila = document.getElementById('btn-nc-agregar-bf');
+if (btnAgregarBfFila) {
+  btnAgregarBfFila.addEventListener('click', () => {
+    _ncBfCount++;
+    const contenedor = document.getElementById('nc-bf-filas');
+    const div = document.createElement('div');
+    div.className = 'nc-bf-fila';
+    div.dataset.idx = _ncBfCount;
+    div.innerHTML = `
+      <div class="campos-fila">
+        <div class="campo"><label>Nombre completo *</label><input type="text" name="nc-bf-nombre-${_ncBfCount}" class="nc-bf-nombre" required /></div>
+        <div class="campo"><label>Cédula / Pasaporte</label><input type="text" name="nc-bf-cedula-${_ncBfCount}" class="nc-bf-cedula" /></div>
+      </div>
+      <div class="campos-fila">
+        <div class="campo"><label>Nacionalidad</label><input type="text" name="nc-bf-nac-${_ncBfCount}" class="nc-bf-nac" /></div>
+        <div class="campo"><label>% Participación</label><input type="number" name="nc-bf-pct-${_ncBfCount}" class="nc-bf-pct" min="0" max="100" step="0.01" /></div>
+        <div class="campo"><label>Cargo / Función</label><input type="text" name="nc-bf-cargo-${_ncBfCount}" class="nc-bf-cargo" /></div>
+      </div>
+      <button type="button" class="btn-borrar btn-chico nc-bf-eliminar">✕ Quitar</button>`;
+    div.querySelector('.nc-bf-eliminar').addEventListener('click', () => div.remove());
+    contenedor.appendChild(div);
+  });
+}
+
 document.getElementById('form-nuevo-cliente').addEventListener('submit', async e => {
   e.preventDefault();
   const err = document.getElementById('error-nuevo-cliente');
   err.classList.add('oculto');
+  const tipo = document.getElementById('nc-tipo').value;
+
+  // Recoger notas del campo correcto según tipo
+  const notasEl = tipo === 'juridica'
+    ? document.getElementById('nc-notas')
+    : (document.getElementById('nc-notas-natural') || document.getElementById('nc-notas'));
 
   const body = {
-    nombre         : document.getElementById('nc-nombre').value.trim(),
-    cedula         : document.getElementById('nc-cedula').value.trim(),
-    tipo           : document.getElementById('nc-tipo').value,
-    nacionalidad   : document.getElementById('nc-nacionalidad').value.trim(),
-    fechaNacimiento: document.getElementById('nc-fecha-nacimiento').value.trim(),
-    notas          : document.getElementById('nc-notas').value.trim(),
-    usuario        : usuarioActual,
+    nombre            : document.getElementById('nc-nombre').value.trim(),
+    cedula            : document.getElementById('nc-cedula').value.trim(),
+    tipo,
+    nacionalidad      : document.getElementById('nc-nacionalidad').value.trim(),
+    fechaNacimiento   : document.getElementById('nc-fecha-nacimiento').value.trim(),
+    notas             : notasEl ? notasEl.value.trim() : '',
+    usuario           : usuarioActual,
+    direccion         : (document.getElementById('nc-direccion') || {}).value?.trim() || '',
+    actividadEconomica: (document.getElementById('nc-actividad') || {}).value?.trim() || '',
+    origenFondos      : (document.getElementById('nc-origen-fondos') || {}).value?.trim() || '',
+    representanteLegal: tipo === 'juridica' ? ((document.getElementById('nc-representante') || {}).value?.trim() || '') : '',
   };
 
   if (!body.nombre) {
@@ -568,16 +614,69 @@ document.getElementById('form-nuevo-cliente').addEventListener('submit', async e
     return;
   }
 
+  // Recoger beneficiarios del formulario (solo jurídica)
+  const bfFilas = [];
+  if (tipo === 'juridica') {
+    document.querySelectorAll('#nc-bf-filas .nc-bf-fila').forEach(fila => {
+      const nombre = fila.querySelector('.nc-bf-nombre')?.value.trim();
+      if (nombre) {
+        bfFilas.push({
+          nombre,
+          cedula      : fila.querySelector('.nc-bf-cedula')?.value.trim() || '',
+          nacionalidad: fila.querySelector('.nc-bf-nac')?.value.trim() || '',
+          participacion: fila.querySelector('.nc-bf-pct')?.value || '',
+          cargo       : fila.querySelector('.nc-bf-cargo')?.value.trim() || '',
+        });
+      }
+    });
+  }
+
+  // Mostrar progreso si hay beneficiarios
+  const progEl = document.getElementById('nc-progreso');
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  if (bfFilas.length && progEl) progEl.classList.remove('oculto');
+  if (submitBtn) submitBtn.disabled = true;
+
   try {
     const res  = await fetch('/api/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al crear el cliente.');
+    const clienteId = data.id;
+
+    // Crear beneficiarios secuencialmente
+    let bfErrores = [];
+    for (let i = 0; i < bfFilas.length; i++) {
+      if (progEl) progEl.textContent = `Verificando beneficiario ${i + 1} de ${bfFilas.length} en listas AML…`;
+      try {
+        const bfRes = await fetch(`/api/clientes/${clienteId}/beneficiarios`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ ...bfFilas[i], usuario: usuarioActual }),
+        });
+        const bfData = await bfRes.json();
+        if (!bfRes.ok) bfErrores.push(`${bfFilas[i].nombre}: ${bfData.error}`);
+        else if (bfData.coincidencia) bfErrores.push(`⚠ ${bfFilas[i].nombre}: COINCIDENCIA en listas AML`);
+      } catch (bfErr) {
+        bfErrores.push(`${bfFilas[i].nombre}: ${bfErr.message}`);
+      }
+    }
+
     document.getElementById('form-nuevo-cliente').reset();
+    document.getElementById('nc-bf-filas').innerHTML = '';
     document.getElementById('form-nuevo-cliente-tarjeta').classList.add('oculto');
+    if (progEl) progEl.classList.add('oculto');
+
+    if (bfErrores.length) {
+      alert('Cliente creado. Advertencias de beneficiarios:\n' + bfErrores.join('\n'));
+    }
+
     cargarClientes();
-    abrirFichaCliente(data.id);
+    abrirFichaCliente(clienteId);
   } catch (e2) {
     mostrarError(err, e2.message);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+    if (progEl) progEl.classList.add('oculto');
   }
 });
 
@@ -603,7 +702,16 @@ function renderizarFicha(cliente, documentos, historial, beneficiarios, riesgoCa
   document.getElementById('ficha-fecha-nacimiento').textContent = cliente.fecha_nacimiento || '—';
   document.getElementById('ficha-creado').textContent = cliente.creado_en || '—';
 
+  // Campos nuevos en encabezado de ficha
+  const dirEl = document.getElementById('ficha-direccion');
+  if (dirEl) dirEl.textContent = cliente.direccion || '—';
+  const repEl = document.getElementById('ficha-representante');
+  if (repEl) repEl.textContent = cliente.representante_legal || '—';
+
   renderizarAnalisisRiesgo(cliente, riesgoCalculado, pendientes);
+  renderizarAprobacion(cliente);
+  renderizarROSCliente(cliente.id);
+  renderizarConservacion(cliente);
 
   document.getElementById('form-editar-cliente').classList.add('oculto');
 
@@ -688,6 +796,12 @@ document.getElementById('btn-editar-cliente').addEventListener('click', () => {
   document.getElementById('ec-actividad-economica').value = clienteEnFicha.actividad_economica || '';
   document.getElementById('ec-origen-fondos').value = clienteEnFicha.origen_fondos || '';
   document.getElementById('ec-rango-ingresos').value = clienteEnFicha.rango_ingresos || '';
+  const ecDirEl = document.getElementById('ec-direccion');
+  if (ecDirEl) ecDirEl.value = clienteEnFicha.direccion || '';
+  const ecRepEl = document.getElementById('ec-representante');
+  if (ecRepEl) ecRepEl.value = clienteEnFicha.representante_legal || '';
+  const ecFinEl = document.getElementById('ec-fecha-fin');
+  if (ecFinEl) ecFinEl.value = clienteEnFicha.fecha_fin_relacion || '';
   f.classList.remove('oculto');
 });
 document.getElementById('btn-cancelar-editar-cliente').addEventListener('click', () => {
@@ -708,6 +822,9 @@ document.getElementById('form-editar-cliente').addEventListener('submit', async 
     actividadEconomica: document.getElementById('ec-actividad-economica').value.trim(),
     origenFondos      : document.getElementById('ec-origen-fondos').value.trim(),
     rangoIngresos     : document.getElementById('ec-rango-ingresos').value.trim(),
+    direccion         : (document.getElementById('ec-direccion') || {}).value?.trim() || '',
+    representanteLegal: (document.getElementById('ec-representante') || {}).value?.trim() || '',
+    fechaFinRelacion  : (document.getElementById('ec-fecha-fin') || {}).value?.trim() || '',
   };
   try {
     const res  = await fetch(`/api/clientes/${clienteEnFicha.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -841,7 +958,7 @@ fileDoc.addEventListener('change', async () => {
 // ── Análisis de Riesgo Automático (Art. 26-B) ────────────────────────────────
 const RIESGO_LABELS = { bajo: 'Bajo', medio: 'Medio', alto: 'Alto — Diligencia Ampliada', pendiente: 'Pendiente' };
 const RIESGO_CLASES = { bajo: 'badge-riesgo--bajo', medio: 'badge-riesgo--medio', alto: 'badge-riesgo--alto', pendiente: 'badge-riesgo--pendiente' };
-const PENDIENTE_ICONOS = { campo: '📋', documento: '📄', beneficiario: '👥', revision: '🔔' };
+const PENDIENTE_ICONOS = { campo: '📋', documento: '📄', beneficiario: '👥', revision: '🔔', aprobacion: '✅', conservacion: '🗂' };
 
 function renderizarAnalisisRiesgo(cliente, rc, pendientes) {
   if (!rc) return;
@@ -1098,6 +1215,301 @@ document.getElementById('form-nuevo-beneficiario').addEventListener('submit', as
   } finally {
     btnEl.disabled = false;
     txtEl.textContent = 'Agregar y Verificar en Listas AML';
+  }
+});
+
+// ── Aprobación de Alta Gerencia (Art. 26) ─────────────────────────────────────
+function renderizarAprobacion(cliente) {
+  const card = document.getElementById('card-aprobacion');
+  if (!card) return;
+
+  const esAlto = (cliente.nivel_riesgo === 'alto') || (cliente.aprobacion_gerencia && cliente.aprobacion_gerencia !== 'no_requerida');
+  card.classList.toggle('oculto', !esAlto);
+  if (!esAlto) return;
+
+  const bloque = document.getElementById('aprobacion-estado-bloque');
+  const estado = cliente.aprobacion_gerencia || 'no_requerida';
+  const clases = { pendiente: 'texto-warn', aprobada: 'texto-ok', rechazada: 'texto-error', no_requerida: '' };
+  const labels = { pendiente: '⏳ Pendiente de decisión', aprobada: '✓ Aprobada', rechazada: '✗ Rechazada', no_requerida: '—' };
+
+  bloque.innerHTML = `
+    <div class="aprobacion-resumen">
+      <span class="${clases[estado] || ''}" style="font-weight:600">${labels[estado] || estado}</span>
+      ${cliente.aprobacion_por ? `<span class="subtitulo-legal"> · Por: ${esc(cliente.aprobacion_por)}</span>` : ''}
+      ${cliente.aprobacion_fecha ? `<span class="subtitulo-legal"> · Fecha: ${esc(cliente.aprobacion_fecha)}</span>` : ''}
+      ${cliente.aprobacion_notas ? `<p style="margin-top:6px;font-size:0.9em">${esc(cliente.aprobacion_notas)}</p>` : ''}
+    </div>`;
+
+  const form = document.getElementById('form-aprobacion');
+  if (!form._wired) {
+    form._wired = true;
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      if (!clienteEnFicha) return;
+      const body = {
+        estado: document.getElementById('apr-estado').value,
+        aprobadoPor: document.getElementById('apr-por').value.trim(),
+        notas: document.getElementById('apr-notas').value.trim(),
+        usuario: usuarioActual,
+      };
+      try {
+        const res = await fetch(`/api/clientes/${clienteEnFicha.id}/aprobacion`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Error al guardar aprobación.');
+        abrirFichaCliente(clienteEnFicha.id);
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+      }
+    });
+  }
+
+  document.getElementById('apr-estado').value = estado === 'no_requerida' ? 'pendiente' : estado;
+  document.getElementById('apr-por').value = cliente.aprobacion_por || '';
+  document.getElementById('apr-notas').value = cliente.aprobacion_notas || '';
+}
+
+// ── ROS por cliente (Art. 42) ─────────────────────────────────────────────────
+async function renderizarROSCliente(clienteId) {
+  const lista = document.getElementById('lista-ros-cliente');
+  if (!lista) return;
+  lista.innerHTML = '<p class="cargando-msg">Cargando…</p>';
+  try {
+    const res  = await fetch(`/api/ros?clienteId=${clienteId}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cargar ROS.');
+
+    if (!data.length) {
+      lista.innerHTML = '<p class="cargando-msg">Sin ROS registrados para este cliente.</p>';
+    } else {
+      lista.innerHTML = data.map(r => {
+        const esReportado = r.estado === 'reportado';
+        return `
+          <div class="ros-item">
+            <div class="ros-item-header">
+              <span class="badge-ros badge-ros--${esc(r.estado)}">${esReportado ? '✓ Reportado a UAF' : '📝 Borrador'}</span>
+              <span class="ros-tipo">${esc(r.tipo_operacion || '—')}</span>
+              <span class="ros-monto">${r.monto ? 'USD ' + Number(r.monto).toLocaleString('es-PA') : '—'}</span>
+              <span class="subtitulo-legal">Detectado: ${esc(r.fecha_deteccion || '—')} · Límite: <strong>${esc(r.fecha_limite || '—')}</strong></span>
+            </div>
+            <p class="ros-descripcion">${esc(r.descripcion || '')}</p>
+            ${r.numero_ref_uaf ? `<p class="subtitulo-legal">Ref. UAF: ${esc(r.numero_ref_uaf)}</p>` : ''}
+            <div class="ros-acciones">
+              ${!esReportado ? `<button class="btn-primario btn-chico btn-marcar-reportado" data-id="${r.id}">✓ Marcar como reportado a UAF</button>` : ''}
+              <button class="btn-borrar btn-chico btn-borrar-ros" data-id="${r.id}">✕ Eliminar</button>
+            </div>
+          </div>`;
+      }).join('');
+
+      lista.querySelectorAll('.btn-marcar-reportado').forEach(btn => btn.addEventListener('click', async () => {
+        const refUaf = prompt('Número de referencia UAF (opcional):') ?? '';
+        try {
+          const r2 = await fetch(`/api/ros/${btn.dataset.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: 'reportado', numeroRefUaf: refUaf, usuario: usuarioActual }),
+          });
+          if (!r2.ok) throw new Error((await r2.json()).error || 'Error');
+          renderizarROSCliente(clienteId);
+        } catch (err) { alert(`Error: ${err.message}`); }
+      }));
+
+      lista.querySelectorAll('.btn-borrar-ros').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('¿Eliminar este ROS?')) return;
+        try {
+          await fetch(`/api/ros/${btn.dataset.id}`, { method: 'DELETE' });
+          renderizarROSCliente(clienteId);
+        } catch (err) { alert(`Error: ${err.message}`); }
+      }));
+    }
+  } catch (err) {
+    lista.innerHTML = `<p class="cargando-msg">Error: ${esc(err.message)}</p>`;
+  }
+}
+
+// Botón nuevo ROS desde ficha de cliente
+const btnNuevoRosCliente = document.getElementById('btn-nuevo-ros-cliente');
+if (btnNuevoRosCliente) {
+  btnNuevoRosCliente.addEventListener('click', async () => {
+    if (!clienteEnFicha) return;
+    const desc = prompt('Descripción de la operación sospechosa:');
+    if (!desc) return;
+    const fecha = prompt('Fecha de detección (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+    if (!fecha) return;
+    const monto = prompt('Monto estimado (USD, deje en blanco si desconocido):') || '';
+    const tipo  = prompt('Tipo de operación (ej. transferencia, depósito, efectivo…):') || '';
+    try {
+      const res = await fetch('/api/ros', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clienteId: clienteEnFicha.id,
+          fechaDeteccion: fecha,
+          descripcion: desc,
+          monto,
+          tipoOperacion: tipo,
+          reportadoPor: usuarioActual,
+          creadoPor: usuarioActual,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al crear ROS.');
+      renderizarROSCliente(clienteEnFicha.id);
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  });
+}
+
+// ── Conservación de Registros (Art. 38) ──────────────────────────────────────
+function renderizarConservacion(cliente) {
+  const div = document.getElementById('conservacion-info');
+  if (!div) return;
+  if (!cliente.fecha_fin_relacion) {
+    div.innerHTML = `<p>La relación con este cliente está <strong>activa</strong>. El contador de 5 años comenzará cuando se registre la fecha de fin de relación.</p>
+      <p class="subtitulo-legal">Art. 38, Ley 23 de 2015: los documentos deben conservarse por un mínimo de 5 años desde el fin de la relación comercial.</p>`;
+    return;
+  }
+  const finRelacion = new Date(cliente.fecha_fin_relacion);
+  const limiteConservacion = new Date(finRelacion);
+  limiteConservacion.setFullYear(limiteConservacion.getFullYear() + 5);
+  const hoy = new Date();
+  const diasRestantes = Math.round((limiteConservacion - hoy) / (1000 * 60 * 60 * 24));
+  const puedeArchivar = hoy >= limiteConservacion;
+  const alerta90 = diasRestantes <= 90 && !puedeArchivar;
+
+  div.innerHTML = `
+    <div class="conservacion-grid">
+      <div><span class="subtitulo-legal">Fin de relación</span><br><strong>${esc(cliente.fecha_fin_relacion)}</strong></div>
+      <div><span class="subtitulo-legal">Límite conservación (5 años)</span><br><strong>${limiteConservacion.toISOString().split('T')[0]}</strong></div>
+      <div><span class="subtitulo-legal">Estado</span><br>
+        ${puedeArchivar
+          ? '<span class="texto-ok">✓ Período cumplido — puede archivarse o eliminarse según política interna</span>'
+          : alerta90
+          ? `<span class="texto-warn">⚠ Faltan ${diasRestantes} días — próximo a vencer</span>`
+          : `<span>Faltan ${diasRestantes} días</span>`}
+      </div>
+    </div>
+    <p class="subtitulo-legal" style="margin-top:8px">Art. 38, Ley 23 de 2015: 5 años de conservación obligatoria desde el fin de la relación comercial.</p>`;
+}
+
+// ── ROS — Tab Global (Art. 42) ────────────────────────────────────────────────
+async function cargarROS() {
+  const tbody = document.getElementById('tbody-ros');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="8" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const res  = await fetch('/api/ros');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cargar ROS.');
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="cargando-msg">Sin reportes de operaciones sospechosas registrados.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(r => {
+      const esReportado = r.estado === 'reportado';
+      return `
+        <tr class="${!esReportado ? 'es-alerta' : ''}">
+          <td>${r.id}</td>
+          <td>${esc(r.cliente_nombre || r.cliente_id || '—')}</td>
+          <td>${esc(r.fecha_deteccion || '—')}</td>
+          <td><strong>${esc(r.fecha_limite || '—')}</strong></td>
+          <td>${r.monto ? 'USD ' + Number(r.monto).toLocaleString('es-PA') : '—'}</td>
+          <td>${esc(r.tipo_operacion || '—')}</td>
+          <td>
+            <span class="badge-ros badge-ros--${esc(r.estado)}">
+              ${esReportado ? '✓ Reportado' : '📝 Borrador'}
+            </span>
+          </td>
+          <td>
+            ${!esReportado ? `<button class="btn-primario btn-chico btn-ros-reportar" data-id="${r.id}">Marcar reportado</button> ` : ''}
+            <button class="btn-borrar btn-chico btn-ros-borrar" data-id="${r.id}">✕</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.btn-ros-reportar').forEach(btn => btn.addEventListener('click', async () => {
+      const refUaf = prompt('Número de referencia UAF (opcional):') ?? '';
+      try {
+        const r2 = await fetch(`/api/ros/${btn.dataset.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ estado: 'reportado', numeroRefUaf: refUaf, usuario: usuarioActual }),
+        });
+        if (!r2.ok) throw new Error((await r2.json()).error || 'Error');
+        cargarROS();
+      } catch (err) { alert(`Error: ${err.message}`); }
+    }));
+
+    tbody.querySelectorAll('.btn-ros-borrar').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este ROS?')) return;
+      try {
+        await fetch(`/api/ros/${btn.dataset.id}`, { method: 'DELETE' });
+        cargarROS();
+      } catch (err) { alert(`Error: ${err.message}`); }
+    }));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+// Formulario nuevo ROS global
+const formRos = document.getElementById('form-nuevo-ros');
+if (formRos) {
+  formRos.addEventListener('submit', async e => {
+    e.preventDefault();
+    const err = document.getElementById('error-ros');
+    if (err) err.classList.add('oculto');
+    const body = {
+      clienteId     : document.getElementById('ros-cliente-id').value || null,
+      fechaDeteccion: document.getElementById('ros-fecha').value,
+      tipoOperacion : document.getElementById('ros-tipo').value.trim(),
+      monto         : document.getElementById('ros-monto').value || null,
+      descripcion   : document.getElementById('ros-descripcion').value.trim(),
+      reportadoPor  : document.getElementById('ros-reportado-por').value.trim() || usuarioActual,
+      notas         : document.getElementById('ros-notas').value.trim(),
+      creadoPor     : usuarioActual,
+    };
+    if (!body.descripcion) {
+      if (err) { err.textContent = 'La descripción es obligatoria.'; err.classList.remove('oculto'); }
+      return;
+    }
+    try {
+      const res  = await fetch('/api/ros', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al crear ROS.');
+      formRos.reset();
+      cargarROS();
+    } catch (e2) {
+      if (err) { err.textContent = e2.message; err.classList.remove('oculto'); }
+      else alert(e2.message);
+    }
+  });
+}
+
+// Cargar select de clientes en tab ROS
+async function cargarSelectClientesROS() {
+  const sel = document.getElementById('ros-cliente-id');
+  if (!sel || sel.dataset.cargado) return;
+  try {
+    const res  = await fetch('/api/clientes');
+    const data = await res.json();
+    sel.innerHTML = '<option value="">— Sin cliente asociado —</option>' +
+      data.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
+    sel.dataset.cargado = '1';
+  } catch (_) {}
+}
+
+// ── Actualizar tab handler para ROS ──────────────────────────────────────────
+// (el tab ya llama cargarROS en el bloque de tabs, pero también necesitamos cargar el select)
+document.querySelectorAll('.tab').forEach(btn => {
+  if (btn.dataset.tab === 'ros') {
+    btn.addEventListener('click', () => {
+      cargarSelectClientesROS();
+    });
   }
 });
 

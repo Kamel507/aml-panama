@@ -171,11 +171,37 @@ async function initDB() {
     )
   `);
 
-  // Migración: perfil de riesgo y debida diligencia ampliada (Art. 26-B, 40, Ley 23 de 2015)
+  // Migraciones: campos adicionales Ley 23 de 2015
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN nivel_riesgo TEXT DEFAULT 'pendiente'");
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN actividad_economica TEXT");
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN origen_fondos TEXT");
   agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN rango_ingresos TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN direccion TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN representante_legal TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN fecha_fin_relacion TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_gerencia TEXT DEFAULT 'no_requerida'");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_fecha TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_por TEXT");
+  agregarColumnaSiNoExiste("ALTER TABLE clientes ADD COLUMN aprobacion_notas TEXT");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS reportes_sospechosos (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      cliente_id          INTEGER,
+      fecha_deteccion     TEXT NOT NULL,
+      fecha_limite        TEXT NOT NULL,
+      fecha_reporte_uaf   TEXT,
+      descripcion         TEXT NOT NULL,
+      monto               TEXT,
+      tipo_operacion      TEXT,
+      estado              TEXT DEFAULT 'borrador',
+      reportado_por       TEXT,
+      numero_ref_uaf      TEXT,
+      notas               TEXT,
+      creado_por          TEXT,
+      creado_en           TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS documentos_cliente (
@@ -1094,29 +1120,70 @@ function calcularRiesgoCliente(cliente, historial, beneficiarios) {
   };
 }
 
+function diasHabiles(fechaISO, dias) {
+  const d = new Date(fechaISO);
+  let n = 0;
+  while (n < dias) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) n++;
+  }
+  return d.toISOString().split('T')[0];
+}
+
 function calcularPendientes(cliente, documentos, beneficiarios, riesgo) {
   const items = [];
-  if (!cliente.cedula)              items.push({ tipo: 'campo',       msg: 'Falta número de cédula / RUC' });
-  if (!cliente.nacionalidad)        items.push({ tipo: 'campo',       msg: 'Falta país / nacionalidad' });
-  if (!cliente.actividad_economica) items.push({ tipo: 'campo',       msg: 'Falta actividad económica (Art. 40)' });
-  if (!cliente.origen_fondos)       items.push({ tipo: 'campo',       msg: 'Falta declaración de origen de fondos (Art. 26)' });
+  const esJuridica = cliente.tipo === 'juridica';
 
+  // Campos básicos
+  if (!cliente.cedula)              items.push({ tipo: 'campo', msg: 'Falta número de cédula / RUC' });
+  if (!cliente.nacionalidad)        items.push({ tipo: 'campo', msg: 'Falta país / nacionalidad' });
+  if (!cliente.actividad_economica) items.push({ tipo: 'campo', msg: 'Falta actividad económica (Art. 40)' });
+  if (!cliente.origen_fondos)       items.push({ tipo: 'campo', msg: 'Falta declaración de origen de fondos (Art. 26)' });
+  if (!cliente.direccion)           items.push({ tipo: 'campo', msg: 'Falta dirección (Art. 23)' });
+  if (esJuridica && !cliente.representante_legal)
+    items.push({ tipo: 'campo', msg: 'Falta representante legal / apoderado (Art. 28)' });
+
+  // Documentos
   if (documentos.length === 0) {
     items.push({ tipo: 'documento', msg: 'Sin documentos subidos al expediente' });
   } else {
     if (!documentos.some(d => ['cedula','pasaporte'].includes(d.tipo_documento)))
       items.push({ tipo: 'documento', msg: 'Falta copia de documento de identidad (cédula o pasaporte)' });
-    if (cliente.tipo === 'juridica' && !documentos.some(d => d.tipo_documento === 'pacto_social'))
+    if (esJuridica && !documentos.some(d => d.tipo_documento === 'pacto_social'))
       items.push({ tipo: 'documento', msg: 'Falta pacto social / escritura de constitución (Art. 28)' });
   }
 
-  if (cliente.tipo === 'juridica' && beneficiarios.length === 0)
+  // Beneficiarios finales
+  if (esJuridica && beneficiarios.length === 0)
     items.push({ tipo: 'beneficiario', msg: 'Sin beneficiarios finales registrados (Art. 26-A y 28)' });
 
+  // Aprobación de gerencia para alto riesgo (Art. 26)
+  if (riesgo.nivel === 'alto') {
+    const apr = cliente.aprobacion_gerencia || 'no_requerida';
+    if (apr === 'no_requerida' || apr === 'pendiente')
+      items.push({ tipo: 'aprobacion', msg: 'Requiere aprobación de alta gerencia — cliente de alto riesgo (Art. 26)' });
+    if (apr === 'rechazada')
+      items.push({ tipo: 'aprobacion', msg: 'Aprobación de gerencia RECHAZADA — relación no debe continuar (Art. 26)' });
+  }
+
+  // Revisión AML vencida / próxima
   if (riesgo.vencido)
-    items.push({ tipo: 'revision', msg: `Revisión AML vencida hace ${Math.abs(riesgo.diasRestantes)} días — frecuencia requerida: cada ${riesgo.frecuenciaMeses} meses` });
+    items.push({ tipo: 'revision', msg: `Revisión AML vencida hace ${Math.abs(riesgo.diasRestantes)} días — frecuencia: cada ${riesgo.frecuenciaMeses} meses` });
   else if (riesgo.proximoVencer)
     items.push({ tipo: 'revision', msg: `Revisión AML vence en ${riesgo.diasRestantes} día(s) — límite: ${riesgo.proximaRevision}` });
+
+  // Conservación de registros — Art. 38 (5 años desde fin de relación)
+  if (cliente.fecha_fin_relacion) {
+    const fin = new Date(cliente.fecha_fin_relacion);
+    const limite = new Date(fin);
+    limite.setFullYear(limite.getFullYear() + 5);
+    const hoy = new Date();
+    const diasParaLimite = Math.ceil((limite - hoy) / 86400000);
+    if (diasParaLimite < 0)
+      items.push({ tipo: 'conservacion', msg: `Período de conservación de 5 años cumplido (desde ${cliente.fecha_fin_relacion}) — expediente puede archivarse (Art. 38)` });
+    else if (diasParaLimite <= 90)
+      items.push({ tipo: 'conservacion', msg: `Conservación obligatoria vence en ${diasParaLimite} días — ${limite.toISOString().split('T')[0]} (Art. 38)` });
+  }
 
   return items;
 }
@@ -1153,14 +1220,16 @@ app.get('/api/clientes/:id', (req, res) => {
     [cliente.id]
   );
 
+  const ros            = dbAll('SELECT * FROM reportes_sospechosos WHERE cliente_id = ? ORDER BY id DESC', [cliente.id]);
   const riesgoCalculado = calcularRiesgoCliente(cliente, historial, beneficiarios);
   const pendientes      = calcularPendientes(cliente, documentos, beneficiarios, riesgoCalculado);
 
-  res.json({ cliente, documentos, historial, beneficiarios, riesgoCalculado, pendientes });
+  res.json({ cliente, documentos, historial, beneficiarios, ros, riesgoCalculado, pendientes });
 });
 
 app.post('/api/clientes', (req, res) => {
-  const { nombre, cedula, tipo, nacionalidad, fechaNacimiento, notas, usuario } = req.body;
+  const { nombre, cedula, tipo, nacionalidad, fechaNacimiento, notas, usuario,
+          direccion, representanteLegal, actividadEconomica, origenFondos } = req.body;
   const nombreT = (nombre || '').trim();
   if (!nombreT) return res.status(400).json({ error: 'El nombre del cliente es obligatorio.' });
 
@@ -1169,8 +1238,10 @@ app.post('/api/clientes', (req, res) => {
   fs.mkdirSync(path.join(clientesDir, carpeta), { recursive: true });
 
   const id = dbInsert(
-    `INSERT INTO clientes (nombre, cedula, tipo, nacionalidad, fecha_nacimiento, notas, carpeta, creado_por)
-     VALUES (?,?,?,?,?,?,?,?)`,
+    `INSERT INTO clientes
+       (nombre, cedula, tipo, nacionalidad, fecha_nacimiento, notas, carpeta, creado_por,
+        direccion, representante_legal, actividad_economica, origen_fondos)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       nombreT,
       (cedula || '').trim() || null,
@@ -1180,6 +1251,10 @@ app.post('/api/clientes', (req, res) => {
       (notas || '').trim() || null,
       carpeta,
       (usuario || '').trim() || null,
+      (direccion || '').trim() || null,
+      (representanteLegal || '').trim() || null,
+      (actividadEconomica || '').trim() || null,
+      (origenFondos || '').trim() || null,
     ]
   );
   res.json(dbGet('SELECT * FROM clientes WHERE id = ?', [id]));
@@ -1190,11 +1265,13 @@ app.put('/api/clientes/:id', (req, res) => {
   if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado.' });
 
   const { nombre, cedula, tipo, nacionalidad, fechaNacimiento, notas,
-          nivelRiesgo, actividadEconomica, origenFondos, rangoIngresos } = req.body;
+          nivelRiesgo, actividadEconomica, origenFondos, rangoIngresos,
+          direccion, representanteLegal, fechaFinRelacion } = req.body;
   dbExec(
     `UPDATE clientes
      SET nombre = ?, cedula = ?, tipo = ?, nacionalidad = ?, fecha_nacimiento = ?, notas = ?,
-         nivel_riesgo = ?, actividad_economica = ?, origen_fondos = ?, rango_ingresos = ?
+         nivel_riesgo = ?, actividad_economica = ?, origen_fondos = ?, rango_ingresos = ?,
+         direccion = ?, representante_legal = ?, fecha_fin_relacion = ?
      WHERE id = ?`,
     [
       (nombre ?? cliente.nombre).trim() || cliente.nombre,
@@ -1207,6 +1284,9 @@ app.put('/api/clientes/:id', (req, res) => {
       actividadEconomica ?? cliente.actividad_economica,
       origenFondos ?? cliente.origen_fondos,
       rangoIngresos ?? cliente.rango_ingresos,
+      direccion ?? cliente.direccion,
+      representanteLegal ?? cliente.representante_legal,
+      fechaFinRelacion ?? cliente.fecha_fin_relacion,
       cliente.id,
     ]
   );
@@ -1613,6 +1693,100 @@ function verificarEspacio(doc, y, necesario) {
     doc.y = 60;
   }
 }
+
+// ─── API: Aprobación de alta gerencia (Art. 26) ──────────────────────────────
+app.put('/api/clientes/:id/aprobacion', (req, res) => {
+  const cliente = dbGet('SELECT * FROM clientes WHERE id = ?', [req.params.id]);
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado.' });
+  const { estado, aprobadoPor, notas } = req.body;
+  const estadosValidos = ['pendiente', 'aprobada', 'rechazada', 'no_requerida'];
+  if (!estadosValidos.includes(estado)) return res.status(400).json({ error: 'Estado inválido.' });
+  const { fecha } = ahoraPA();
+  dbExec(
+    'UPDATE clientes SET aprobacion_gerencia = ?, aprobacion_fecha = ?, aprobacion_por = ?, aprobacion_notas = ? WHERE id = ?',
+    [estado, fecha, (aprobadoPor || '').trim() || null, (notas || '').trim() || null, cliente.id]
+  );
+  res.json(dbGet('SELECT * FROM clientes WHERE id = ?', [cliente.id]));
+});
+
+// ─── API: Reportes de Operaciones Sospechosas — ROS (Art. 42) ────────────────
+app.get('/api/ros', (req, res) => {
+  const rows = dbAll(
+    `SELECT r.*, c.nombre AS cliente_nombre
+     FROM reportes_sospechosos r
+     LEFT JOIN clientes c ON c.id = r.cliente_id
+     ORDER BY r.id DESC`
+  );
+  res.json(rows);
+});
+
+app.get('/api/ros/:id', (req, res) => {
+  const row = dbGet(
+    `SELECT r.*, c.nombre AS cliente_nombre FROM reportes_sospechosos r
+     LEFT JOIN clientes c ON c.id = r.cliente_id WHERE r.id = ?`,
+    [req.params.id]
+  );
+  if (!row) return res.status(404).json({ error: 'ROS no encontrado.' });
+  res.json(row);
+});
+
+app.post('/api/ros', (req, res) => {
+  const { clienteId, fechaDeteccion, descripcion, monto, tipoOperacion, reportadoPor, notas } = req.body;
+  const fechaD = (fechaDeteccion || '').trim();
+  const descT  = (descripcion || '').trim();
+  if (!fechaD) return res.status(400).json({ error: 'La fecha de detección es obligatoria.' });
+  if (!descT)  return res.status(400).json({ error: 'La descripción es obligatoria.' });
+
+  const fechaLimite = diasHabiles(fechaD + 'T00:00:00', 3);
+  const id = dbInsert(
+    `INSERT INTO reportes_sospechosos
+       (cliente_id, fecha_deteccion, fecha_limite, descripcion, monto, tipo_operacion, reportado_por, notas, estado, creado_por)
+     VALUES (?,?,?,?,?,?,?,?,'borrador',?)`,
+    [
+      clienteId || null,
+      fechaD,
+      fechaLimite,
+      descT,
+      (monto || '').trim() || null,
+      (tipoOperacion || '').trim() || null,
+      (reportadoPor || '').trim() || null,
+      (notas || '').trim() || null,
+      (reportadoPor || '').trim() || null,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM reportes_sospechosos WHERE id = ?', [id]));
+});
+
+app.put('/api/ros/:id', (req, res) => {
+  const ros = dbGet('SELECT * FROM reportes_sospechosos WHERE id = ?', [req.params.id]);
+  if (!ros) return res.status(404).json({ error: 'ROS no encontrado.' });
+  const { estado, fechaReporteUaf, numeroRefUaf, reportadoPor, notas, monto, tipoOperacion, descripcion } = req.body;
+  dbExec(
+    `UPDATE reportes_sospechosos
+     SET estado = ?, fecha_reporte_uaf = ?, numero_ref_uaf = ?, reportado_por = ?,
+         notas = ?, monto = ?, tipo_operacion = ?, descripcion = ?
+     WHERE id = ?`,
+    [
+      estado ?? ros.estado,
+      fechaReporteUaf ?? ros.fecha_reporte_uaf,
+      numeroRefUaf ?? ros.numero_ref_uaf,
+      reportadoPor ?? ros.reportado_por,
+      notas ?? ros.notas,
+      monto ?? ros.monto,
+      tipoOperacion ?? ros.tipo_operacion,
+      descripcion ?? ros.descripcion,
+      ros.id,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM reportes_sospechosos WHERE id = ?', [ros.id]));
+});
+
+app.delete('/api/ros/:id', (req, res) => {
+  const ros = dbGet('SELECT * FROM reportes_sospechosos WHERE id = ?', [req.params.id]);
+  if (!ros) return res.status(404).json({ error: 'ROS no encontrado.' });
+  dbExec('DELETE FROM reportes_sospechosos WHERE id = ?', [ros.id]);
+  res.json({ ok: true });
+});
 
 // ─── API: Dashboard de alertas y pendientes ──────────────────────────────────
 app.get('/api/alertas', (_req, res) => {
