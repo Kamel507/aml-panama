@@ -19,6 +19,8 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (id === 'ros')       { cargarROS(); cargarSelectClientesROS(); }
     if (id === 'inusuales') { cargarInusuales(); cargarSelectClientesEn('inu-cliente'); }
     if (id === 'congelamiento') { cargarCongelamientos(); cargarSelectClientesEn('con-cliente'); }
+    if (id === 'capacitacion') cargarCapacitaciones();
+    if (id === 'riesgo-inst')  cargarEvaluaciones();
     if (id === 'estado')    { cargarEstadoListas(); cargarPep(); cargarGafi(); }
     if (id === 'clientes') {
       contextoExpediente = btn.dataset.expediente === 'proveedor' ? 'proveedor' : 'cliente';
@@ -2011,6 +2013,171 @@ if (formCongel) formCongel.addEventListener('submit', async e => {
     formCongel.reset();
     document.getElementById('form-nuevo-congelamiento-tarjeta').classList.add('oculto');
     cargarCongelamientos();
+  } catch (e2) { mostrarError(err, e2.message); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CAPACITACIÓN — Decreto 35 de 2022
+// ═══════════════════════════════════════════════════════════════════════════
+async function cargarCapacitaciones() {
+  const tbody = document.getElementById('tbody-capacitaciones');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>';
+  try {
+    const data = await (await fetch('/api/capacitaciones')).json();
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="cargando-msg">Sin capacitaciones registradas.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(c => `
+      <tr>
+        <td>${esc(c.fecha || '—')}</td>
+        <td>${esc(c.titulo)}${c.temas ? `<br><span class="subtitulo-legal">${esc(c.temas).slice(0,90)}</span>` : ''}</td>
+        <td>${esc(c.modalidad || '—')}</td>
+        <td>${esc(c.facilitador || '—')}</td>
+        <td>${esc(c.duracion_horas || '—')}</td>
+        <td>${c.num_participantes || 0}${c.participantes ? ` <button class="btn-secundario btn-chico btn-ver-asistentes" data-id="${c.id}">ver</button>` : ''}</td>
+        <td><button class="btn-borrar btn-chico btn-borrar-cap" data-id="${c.id}">✕</button></td>
+      </tr>`).join('');
+
+    tbody.querySelectorAll('.btn-ver-asistentes').forEach(btn => btn.addEventListener('click', () => {
+      const cap = data.find(x => x.id == btn.dataset.id);
+      alert(`Asistentes a "${cap.titulo}":\n\n${cap.participantes || '—'}`);
+    }));
+    tbody.querySelectorAll('.btn-borrar-cap').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta capacitación?')) return;
+      await fetch(`/api/capacitaciones/${btn.dataset.id}`, { method: 'DELETE' });
+      cargarCapacitaciones();
+    }));
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="cargando-msg">Error: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+const btnNuevaCap = document.getElementById('btn-nueva-capacitacion');
+if (btnNuevaCap) btnNuevaCap.addEventListener('click', () => document.getElementById('form-nueva-capacitacion-tarjeta').classList.remove('oculto'));
+const btnCancelarCap = document.getElementById('btn-cancelar-capacitacion');
+if (btnCancelarCap) btnCancelarCap.addEventListener('click', () => {
+  document.getElementById('form-nueva-capacitacion-tarjeta').classList.add('oculto');
+  document.getElementById('form-nueva-capacitacion').reset();
+});
+
+const formCap = document.getElementById('form-nueva-capacitacion');
+if (formCap) formCap.addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-capacitacion');
+  err.classList.add('oculto');
+  const body = {
+    titulo       : document.getElementById('cap-titulo').value.trim(),
+    fecha        : document.getElementById('cap-fecha').value,
+    modalidad    : document.getElementById('cap-modalidad').value,
+    facilitador  : document.getElementById('cap-facilitador').value.trim(),
+    duracionHoras: document.getElementById('cap-duracion').value.trim(),
+    temas        : document.getElementById('cap-temas').value.trim(),
+    participantes: document.getElementById('cap-participantes').value.trim(),
+    notas        : document.getElementById('cap-notas').value.trim(),
+    usuario      : usuarioActual,
+  };
+  if (!body.titulo) { mostrarError(err, 'El título es obligatorio.'); return; }
+  try {
+    const res = await fetch('/api/capacitaciones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al registrar.');
+    formCap.reset();
+    document.getElementById('form-nueva-capacitacion-tarjeta').classList.add('oculto');
+    cargarCapacitaciones();
+  } catch (e2) { mostrarError(err, e2.message); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EVALUACIÓN DE RIESGO INSTITUCIONAL — Decreto 35 de 2022
+// ═══════════════════════════════════════════════════════════════════════════
+function badgeNivel(n) {
+  if (!n) return '<span class="badge-riesgo badge-riesgo--pendiente">—</span>';
+  return `<span class="badge-riesgo ${RIESGO_CLASES[n] || 'badge-riesgo--pendiente'}">${RIESGO_LABELS[n] || n}</span>`;
+}
+
+async function cargarEvaluaciones() {
+  const cont = document.getElementById('lista-evaluaciones');
+  if (!cont) return;
+  cont.innerHTML = '<p class="cargando-msg">Cargando…</p>';
+  try {
+    const data = await (await fetch('/api/evaluaciones')).json();
+    if (!data.length) {
+      cont.innerHTML = '<p class="cargando-msg">Sin evaluaciones de riesgo institucional. Cree una con "+ Nueva evaluación".</p>';
+      return;
+    }
+    cont.innerHTML = data.map(ev => `
+      <div class="eval-card">
+        <div class="eval-card-header">
+          <div>
+            <span class="eval-periodo">Período ${esc(ev.periodo)}</span>
+            <span class="subtitulo-legal"> · ${esc(ev.fecha || 's/f')} · ${esc(ev.elaborado_por || '—')}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="subtitulo-legal">Riesgo general:</span> ${badgeNivel(ev.riesgo_general)}
+            <button class="btn-borrar btn-chico btn-borrar-eval" data-id="${ev.id}">✕</button>
+          </div>
+        </div>
+        <div class="eval-factores">
+          <div>Clientes: ${badgeNivel(ev.riesgo_clientes)}</div>
+          <div>Productos: ${badgeNivel(ev.riesgo_productos)}</div>
+          <div>Canales: ${badgeNivel(ev.riesgo_canales)}</div>
+          <div>Jurisdiccional: ${badgeNivel(ev.riesgo_jurisdiccional)}</div>
+        </div>
+        ${ev.factores ? `<p class="eval-texto"><strong>Factores:</strong> ${esc(ev.factores)}</p>` : ''}
+        ${ev.controles_mitigacion ? `<p class="eval-texto"><strong>Controles:</strong> ${esc(ev.controles_mitigacion)}</p>` : ''}
+        ${ev.conclusiones ? `<p class="eval-texto"><strong>Conclusiones:</strong> ${esc(ev.conclusiones)}</p>` : ''}
+        ${ev.proxima_evaluacion ? `<p class="subtitulo-legal">Próxima evaluación: ${esc(ev.proxima_evaluacion)}</p>` : ''}
+      </div>`).join('');
+
+    cont.querySelectorAll('.btn-borrar-eval').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta evaluación?')) return;
+      await fetch(`/api/evaluaciones/${btn.dataset.id}`, { method: 'DELETE' });
+      cargarEvaluaciones();
+    }));
+  } catch (err) {
+    cont.innerHTML = `<p class="cargando-msg">Error: ${esc(err.message)}</p>`;
+  }
+}
+
+const btnNuevaEval = document.getElementById('btn-nueva-evaluacion');
+if (btnNuevaEval) btnNuevaEval.addEventListener('click', () => document.getElementById('form-nueva-evaluacion-tarjeta').classList.remove('oculto'));
+const btnCancelarEval = document.getElementById('btn-cancelar-evaluacion');
+if (btnCancelarEval) btnCancelarEval.addEventListener('click', () => {
+  document.getElementById('form-nueva-evaluacion-tarjeta').classList.add('oculto');
+  document.getElementById('form-nueva-evaluacion').reset();
+});
+
+const formEval = document.getElementById('form-nueva-evaluacion');
+if (formEval) formEval.addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('error-evaluacion');
+  err.classList.add('oculto');
+  const body = {
+    periodo             : document.getElementById('ev-periodo').value.trim(),
+    fecha               : document.getElementById('ev-fecha').value,
+    elaboradoPor        : document.getElementById('ev-elaborado-por').value.trim(),
+    riesgoClientes      : document.getElementById('ev-r-clientes').value,
+    riesgoProductos     : document.getElementById('ev-r-productos').value,
+    riesgoCanales       : document.getElementById('ev-r-canales').value,
+    riesgoJurisdiccional: document.getElementById('ev-r-jurisdiccional').value,
+    riesgoGeneral       : document.getElementById('ev-r-general').value,
+    factores            : document.getElementById('ev-factores').value.trim(),
+    controlesMitigacion : document.getElementById('ev-controles').value.trim(),
+    conclusiones        : document.getElementById('ev-conclusiones').value.trim(),
+    proximaEvaluacion   : document.getElementById('ev-proxima').value,
+    notas               : document.getElementById('ev-notas').value.trim(),
+    usuario             : usuarioActual,
+  };
+  if (!body.periodo) { mostrarError(err, 'El período es obligatorio.'); return; }
+  try {
+    const res = await fetch('/api/evaluaciones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar.');
+    formEval.reset();
+    document.getElementById('form-nueva-evaluacion-tarjeta').classList.add('oculto');
+    cargarEvaluaciones();
   } catch (e2) { mostrarError(err, e2.message); }
 });
 

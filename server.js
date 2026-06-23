@@ -261,6 +261,49 @@ async function initDB() {
     )
   `);
 
+  // Capacitación del personal (Decreto 35 de 2022): registro de adiestramientos
+  // en prevención BC/FT/FPADM, con temas, facilitador y asistentes.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS capacitaciones (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      titulo            TEXT NOT NULL,
+      fecha             TEXT,
+      modalidad         TEXT,
+      facilitador       TEXT,
+      duracion_horas    TEXT,
+      temas             TEXT,
+      participantes     TEXT,
+      num_participantes INTEGER,
+      notas             TEXT,
+      creado_por        TEXT,
+      creado_en         TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  // Evaluación de riesgo institucional (Decreto 35 de 2022): valoración del
+  // riesgo de toda la empresa por factores (clientes, productos, canales,
+  // jurisdicciones), con controles de mitigación y riesgo residual.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS evaluaciones_riesgo (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      periodo              TEXT,
+      fecha                TEXT,
+      elaborado_por        TEXT,
+      riesgo_clientes      TEXT,
+      riesgo_productos     TEXT,
+      riesgo_canales       TEXT,
+      riesgo_jurisdiccional TEXT,
+      riesgo_general       TEXT,
+      factores             TEXT,
+      controles_mitigacion TEXT,
+      conclusiones         TEXT,
+      proxima_evaluacion   TEXT,
+      notas                TEXT,
+      creado_por           TEXT,
+      creado_en            TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS reportes_sospechosos (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2224,6 +2267,158 @@ app.delete('/api/congelamientos/:id', (req, res) => {
   const g = dbGet('SELECT * FROM congelamientos WHERE id = ?', [req.params.id]);
   if (!g) return res.status(404).json({ error: 'Congelamiento no encontrado.' });
   dbExec('DELETE FROM congelamientos WHERE id = ?', [g.id]);
+  res.json({ ok: true });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CAPACITACIÓN — Decreto Ejecutivo 35 de 2022
+// ═════════════════════════════════════════════════════════════════════════════
+app.get('/api/capacitaciones', (_req, res) => {
+  res.json(dbAll('SELECT * FROM capacitaciones ORDER BY fecha DESC, id DESC'));
+});
+
+app.post('/api/capacitaciones', (req, res) => {
+  const { titulo, fecha, modalidad, facilitador, duracionHoras, temas, participantes, notas, usuario } = req.body;
+  const tituloT = (titulo || '').trim();
+  if (!tituloT) return res.status(400).json({ error: 'El título de la capacitación es obligatorio.' });
+  const parts = (participantes || '').trim();
+  const numParts = parts ? parts.split(/\r?\n/).filter(l => l.trim()).length : 0;
+
+  const id = dbInsert(
+    `INSERT INTO capacitaciones
+       (titulo, fecha, modalidad, facilitador, duracion_horas, temas, participantes, num_participantes, notas, creado_por)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      tituloT,
+      (fecha || '').trim() || null,
+      (modalidad || '').trim() || null,
+      (facilitador || '').trim() || null,
+      (duracionHoras || '').trim() || null,
+      (temas || '').trim() || null,
+      parts || null,
+      numParts,
+      (notas || '').trim() || null,
+      (usuario || '').trim() || null,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM capacitaciones WHERE id = ?', [id]));
+});
+
+app.put('/api/capacitaciones/:id', (req, res) => {
+  const cap = dbGet('SELECT * FROM capacitaciones WHERE id = ?', [req.params.id]);
+  if (!cap) return res.status(404).json({ error: 'Capacitación no encontrada.' });
+  const { titulo, fecha, modalidad, facilitador, duracionHoras, temas, participantes, notas } = req.body;
+  const parts = participantes !== undefined ? (participantes || '').trim() : cap.participantes;
+  const numParts = parts ? parts.split(/\r?\n/).filter(l => l.trim()).length : 0;
+  dbExec(
+    `UPDATE capacitaciones
+     SET titulo = ?, fecha = ?, modalidad = ?, facilitador = ?, duracion_horas = ?,
+         temas = ?, participantes = ?, num_participantes = ?, notas = ?
+     WHERE id = ?`,
+    [
+      titulo !== undefined ? (titulo || '').trim() || cap.titulo : cap.titulo,
+      fecha !== undefined ? (fecha || '').trim() || null : cap.fecha,
+      modalidad !== undefined ? (modalidad || '').trim() || null : cap.modalidad,
+      facilitador !== undefined ? (facilitador || '').trim() || null : cap.facilitador,
+      duracionHoras !== undefined ? (duracionHoras || '').trim() || null : cap.duracion_horas,
+      temas !== undefined ? (temas || '').trim() || null : cap.temas,
+      parts || null,
+      numParts,
+      notas !== undefined ? (notas || '').trim() || null : cap.notas,
+      cap.id,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM capacitaciones WHERE id = ?', [cap.id]));
+});
+
+app.delete('/api/capacitaciones/:id', (req, res) => {
+  const cap = dbGet('SELECT * FROM capacitaciones WHERE id = ?', [req.params.id]);
+  if (!cap) return res.status(404).json({ error: 'Capacitación no encontrada.' });
+  dbExec('DELETE FROM capacitaciones WHERE id = ?', [cap.id]);
+  res.json({ ok: true });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  EVALUACIÓN DE RIESGO INSTITUCIONAL — Decreto Ejecutivo 35 de 2022
+// ═════════════════════════════════════════════════════════════════════════════
+app.get('/api/evaluaciones', (_req, res) => {
+  res.json(dbAll('SELECT * FROM evaluaciones_riesgo ORDER BY fecha DESC, id DESC'));
+});
+
+app.get('/api/evaluaciones/:id', (req, res) => {
+  const ev = dbGet('SELECT * FROM evaluaciones_riesgo WHERE id = ?', [req.params.id]);
+  if (!ev) return res.status(404).json({ error: 'Evaluación no encontrada.' });
+  res.json(ev);
+});
+
+app.post('/api/evaluaciones', (req, res) => {
+  const { periodo, fecha, elaboradoPor, riesgoClientes, riesgoProductos, riesgoCanales,
+          riesgoJurisdiccional, riesgoGeneral, factores, controlesMitigacion, conclusiones,
+          proximaEvaluacion, notas, usuario } = req.body;
+  const periodoT = (periodo || '').trim();
+  if (!periodoT) return res.status(400).json({ error: 'El período de la evaluación es obligatorio.' });
+
+  const id = dbInsert(
+    `INSERT INTO evaluaciones_riesgo
+       (periodo, fecha, elaborado_por, riesgo_clientes, riesgo_productos, riesgo_canales,
+        riesgo_jurisdiccional, riesgo_general, factores, controles_mitigacion, conclusiones,
+        proxima_evaluacion, notas, creado_por)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      periodoT,
+      (fecha || '').trim() || null,
+      (elaboradoPor || '').trim() || null,
+      (riesgoClientes || '').trim() || null,
+      (riesgoProductos || '').trim() || null,
+      (riesgoCanales || '').trim() || null,
+      (riesgoJurisdiccional || '').trim() || null,
+      (riesgoGeneral || '').trim() || null,
+      (factores || '').trim() || null,
+      (controlesMitigacion || '').trim() || null,
+      (conclusiones || '').trim() || null,
+      (proximaEvaluacion || '').trim() || null,
+      (notas || '').trim() || null,
+      (usuario || '').trim() || null,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM evaluaciones_riesgo WHERE id = ?', [id]));
+});
+
+app.put('/api/evaluaciones/:id', (req, res) => {
+  const ev = dbGet('SELECT * FROM evaluaciones_riesgo WHERE id = ?', [req.params.id]);
+  if (!ev) return res.status(404).json({ error: 'Evaluación no encontrada.' });
+  const b = req.body;
+  const v = (key, col) => b[key] !== undefined ? ((b[key] || '').trim() || null) : ev[col];
+  dbExec(
+    `UPDATE evaluaciones_riesgo
+     SET periodo = ?, fecha = ?, elaborado_por = ?, riesgo_clientes = ?, riesgo_productos = ?,
+         riesgo_canales = ?, riesgo_jurisdiccional = ?, riesgo_general = ?, factores = ?,
+         controles_mitigacion = ?, conclusiones = ?, proxima_evaluacion = ?, notas = ?
+     WHERE id = ?`,
+    [
+      b.periodo !== undefined ? (b.periodo || '').trim() || ev.periodo : ev.periodo,
+      v('fecha', 'fecha'),
+      v('elaboradoPor', 'elaborado_por'),
+      v('riesgoClientes', 'riesgo_clientes'),
+      v('riesgoProductos', 'riesgo_productos'),
+      v('riesgoCanales', 'riesgo_canales'),
+      v('riesgoJurisdiccional', 'riesgo_jurisdiccional'),
+      v('riesgoGeneral', 'riesgo_general'),
+      v('factores', 'factores'),
+      v('controlesMitigacion', 'controles_mitigacion'),
+      v('conclusiones', 'conclusiones'),
+      v('proximaEvaluacion', 'proxima_evaluacion'),
+      v('notas', 'notas'),
+      ev.id,
+    ]
+  );
+  res.json(dbGet('SELECT * FROM evaluaciones_riesgo WHERE id = ?', [ev.id]));
+});
+
+app.delete('/api/evaluaciones/:id', (req, res) => {
+  const ev = dbGet('SELECT * FROM evaluaciones_riesgo WHERE id = ?', [req.params.id]);
+  if (!ev) return res.status(404).json({ error: 'Evaluación no encontrada.' });
+  dbExec('DELETE FROM evaluaciones_riesgo WHERE id = ?', [ev.id]);
   res.json({ ok: true });
 });
 

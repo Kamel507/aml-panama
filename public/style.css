@@ -1056,3 +1056,31 @@ body {
 /* ── Badges de operaciones inusuales y congelamiento ────── */
 .badge-inusual--escalada  { background: var(--rojo-claro); color: var(--rojo); border: 1px solid var(--rojo-borde); }
 .badge-congel--congelado  { background: #E3F2FD; color: #0D47A1; border: 1px solid #64B5F6; }
+/* ── Evaluación de riesgo institucional ─────────────────── */
+.eval-card {
+  border: 1px solid var(--gris-borde);
+  border-radius: var(--radio);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  border-left: 4px solid var(--azul);
+  background: #f8faff;
+}
+.eval-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.eval-periodo { font-weight: 700; font-size: 1rem; color: var(--azul); }
+.eval-factores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 0.85rem;
+}
+.eval-factores > div { display: flex; align-items: center; gap: 6px; }
+.eval-texto { font-size: 0.88rem; color: var(--texto-sub); margin: 6px 0; }
+.select-nivel-riesgo { width: 100%; }

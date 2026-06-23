@@ -38,6 +38,8 @@
     <button class="tab" data-tab="inusuales">🔎 Inusuales</button>
     <button class="tab" data-tab="ros">📋 ROS</button>
     <button class="tab" data-tab="congelamiento">🧊 Congelamiento</button>
+    <button class="tab" data-tab="capacitacion">🎓 Capacitación</button>
+    <button class="tab" data-tab="riesgo-inst">📊 Riesgo Institucional</button>
     <button class="tab" data-tab="estado">🛡 Listas y Cumplimiento</button>
   </nav>
 
@@ -1201,6 +1203,184 @@
               <tr><td colspan="15" class="cargando-msg">Cargando historial…</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: CAPACITACIÓN (Decreto 35 de 2022)
+    ══════════════════════════════════════════════ -->
+    <section id="tab-capacitacion" class="panel">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Capacitación del Personal</h2>
+          <button id="btn-nueva-capacitacion" class="btn-primario btn-chico">+ Registrar capacitación</button>
+        </div>
+        <p class="subtitulo">Registro de adiestramientos en prevención de BC/FT/FPADM (Decreto Ejecutivo 35 de 2022). Documente fecha, temas, facilitador y asistentes.</p>
+
+        <div id="form-nueva-capacitacion-tarjeta" class="oculto ros-form-tarjeta">
+          <h3>Registrar Capacitación</h3>
+          <form id="form-nueva-capacitacion">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="cap-titulo">Título / Tema principal <span class="campo-nota">(obligatorio)</span></label>
+                <input type="text" id="cap-titulo" required maxlength="200" placeholder="Ej: Módulo I — Entendimiento del BC/FT" />
+              </div>
+              <div class="campo">
+                <label for="cap-fecha">Fecha</label>
+                <input type="date" id="cap-fecha" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="cap-modalidad">Modalidad</label>
+                <select id="cap-modalidad">
+                  <option value="">— Seleccione —</option>
+                  <option value="presencial">Presencial / In situ</option>
+                  <option value="virtual">Virtual</option>
+                  <option value="mixta">Mixta</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label for="cap-facilitador">Facilitador / Instructor</label>
+                <input type="text" id="cap-facilitador" maxlength="150" />
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="cap-duracion">Duración (horas)</label>
+                <input type="text" id="cap-duracion" maxlength="20" placeholder="Ej: 4" />
+              </div>
+              <div class="campo"></div>
+            </div>
+            <div class="campo" style="margin-bottom:14px">
+              <label for="cap-temas">Temas cubiertos</label>
+              <textarea id="cap-temas" rows="2" maxlength="1000" placeholder="Ley 23 de 2015, Decreto 35 de 2022, debida diligencia, operaciones inusuales/sospechosas, obligaciones con la UAF…"></textarea>
+            </div>
+            <div class="campo" style="margin-bottom:14px">
+              <label for="cap-participantes">Asistentes <span class="campo-nota">(uno por línea)</span></label>
+              <textarea id="cap-participantes" rows="3" maxlength="2000" placeholder="María González&#10;Juan Pérez&#10;…"></textarea>
+            </div>
+            <div class="campo" style="margin-bottom:14px">
+              <label for="cap-notas">Notas</label>
+              <input type="text" id="cap-notas" maxlength="400" />
+            </div>
+            <div id="error-capacitacion" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Registrar</button>
+              <button type="button" id="btn-cancelar-capacitacion" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tabla-scroll" style="margin-top:16px">
+          <table class="tabla-historial">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Título / Tema</th>
+                <th>Modalidad</th>
+                <th>Facilitador</th>
+                <th>Horas</th>
+                <th>Asistentes</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-capacitaciones">
+              <tr><td colspan="7" class="cargando-msg">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════
+         PESTAÑA: RIESGO INSTITUCIONAL (Decreto 35 de 2022)
+    ══════════════════════════════════════════════ -->
+    <section id="tab-riesgo-inst" class="panel">
+      <div class="tarjeta">
+        <div class="historial-header">
+          <h2>Evaluación de Riesgo Institucional</h2>
+          <button id="btn-nueva-evaluacion" class="btn-primario btn-chico">+ Nueva evaluación</button>
+        </div>
+        <p class="subtitulo">Valoración del riesgo de toda la empresa por factores: clientes, productos/servicios, canales y jurisdicciones (Decreto Ejecutivo 35 de 2022). Debe revisarse periódicamente.</p>
+
+        <div id="form-nueva-evaluacion-tarjeta" class="oculto ros-form-tarjeta">
+          <h3>Nueva Evaluación de Riesgo Institucional</h3>
+          <form id="form-nueva-evaluacion">
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ev-periodo">Período <span class="campo-nota">(obligatorio)</span></label>
+                <input type="text" id="ev-periodo" required maxlength="40" placeholder="Ej: 2026" />
+              </div>
+              <div class="campo">
+                <label for="ev-fecha">Fecha de elaboración</label>
+                <input type="date" id="ev-fecha" />
+              </div>
+              <div class="campo">
+                <label for="ev-elaborado-por">Elaborado por</label>
+                <input type="text" id="ev-elaborado-por" maxlength="150" />
+              </div>
+            </div>
+
+            <h4 class="subtitulo-legal" style="margin:10px 0 6px">Riesgo por factor</h4>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ev-r-clientes">Clientes</label>
+                <select id="ev-r-clientes" class="select-nivel-riesgo"><option value="">—</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select>
+              </div>
+              <div class="campo">
+                <label for="ev-r-productos">Productos / Servicios</label>
+                <select id="ev-r-productos" class="select-nivel-riesgo"><option value="">—</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select>
+              </div>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ev-r-canales">Canales</label>
+                <select id="ev-r-canales" class="select-nivel-riesgo"><option value="">—</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select>
+              </div>
+              <div class="campo">
+                <label for="ev-r-jurisdiccional">Jurisdiccional / Geográfico</label>
+                <select id="ev-r-jurisdiccional" class="select-nivel-riesgo"><option value="">—</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select>
+              </div>
+            </div>
+            <div class="campo" style="margin:10px 0">
+              <label for="ev-r-general">Riesgo residual general</label>
+              <select id="ev-r-general" class="select-nivel-riesgo"><option value="">—</option><option value="bajo">Bajo</option><option value="medio">Medio</option><option value="alto">Alto</option></select>
+            </div>
+
+            <div class="campo" style="margin-bottom:12px">
+              <label for="ev-factores">Análisis de factores</label>
+              <textarea id="ev-factores" rows="3" maxlength="3000" placeholder="Describa los factores de riesgo identificados en cada categoría…"></textarea>
+            </div>
+            <div class="campo" style="margin-bottom:12px">
+              <label for="ev-controles">Controles de mitigación</label>
+              <textarea id="ev-controles" rows="3" maxlength="3000" placeholder="Controles implementados para mitigar los riesgos identificados…"></textarea>
+            </div>
+            <div class="campo" style="margin-bottom:12px">
+              <label for="ev-conclusiones">Conclusiones</label>
+              <textarea id="ev-conclusiones" rows="2" maxlength="2000"></textarea>
+            </div>
+            <div class="campos-fila">
+              <div class="campo">
+                <label for="ev-proxima">Próxima evaluación</label>
+                <input type="date" id="ev-proxima" />
+              </div>
+              <div class="campo">
+                <label for="ev-notas">Notas</label>
+                <input type="text" id="ev-notas" maxlength="400" />
+              </div>
+            </div>
+            <div id="error-evaluacion" class="mensaje-error oculto"></div>
+            <div class="acciones-formulario">
+              <button type="submit" class="btn-primario">Guardar evaluación</button>
+              <button type="button" id="btn-cancelar-evaluacion" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="lista-evaluaciones" style="margin-top:16px">
+          <p class="cargando-msg">Cargando…</p>
         </div>
       </div>
     </section>
