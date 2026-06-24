@@ -417,26 +417,42 @@ function normalize(str) {
     .toUpperCase();
 }
 
+// Palabras vacías: tipos societarios y conectores que NO deben generar
+// coincidencias por sí solas (causaban falsos positivos en razones sociales
+// como "Kamel Group, S.A." coincidiendo con cualquier entrada con "Group").
+const STOPWORDS = new Set([
+  // Tipos / formas societarias
+  'SA','SAC','SRL','LLC','LTD','LTDA','INC','CORP','COMPANY','COMPANIA','CIA',
+  'GROUP','GRUPO','HOLDING','HOLDINGS','CORPORATION','LIMITED','GMBH','PLC','SPA',
+  'INTERNATIONAL','INTERNACIONAL','TRADING','IMPORT','EXPORT','IMPORTADORA','EXPORTADORA',
+  'SERVICES','SERVICIOS','ENTERPRISE','ENTERPRISES','INVERSIONES','INVESTMENT','INVESTMENTS',
+  'CONSULTING','CONSULTORES','SOLUTIONS','SOLUCIONES','PARTNERS','ASOCIADOS','COMERCIAL',
+  'INDUSTRIES','INDUSTRIAS','DISTRIBUIDORA','GENERAL','GLOBAL','WORLDWIDE',
+  // Conectores / artículos (> 2 letras)
+  'DEL','LAS','LOS','AND','THE','FOR','SUS','SAS',
+]);
+
 function tokenScore(search, target) {
   const sNorm = normalize(search);
   const tNorm = normalize(target);
-  if (!sNorm || !tNorm || sNorm.length < 3) return { score: 0, matchedCount: 0 };
+  if (!sNorm || !tNorm || sNorm.length < 3) return { score: 0, matchedCount: 0, exact: false };
 
-  const sTok = sNorm.split(' ').filter(t => t.length > 2);
-  const tTok = tNorm.split(' ').filter(t => t.length > 2);
-  if (!sTok.length || !tTok.length) return { score: 0, matchedCount: 0 };
+  // Tokens significativos: descartan palabras vacías y tokens de ≤2 letras
+  const significativos = s => s.split(' ').filter(t => t.length > 2 && !STOPWORDS.has(t));
+  const sTok = significativos(sNorm);
+  const tTok = significativos(tNorm);
+  if (!sTok.length || !tTok.length) return { score: 0, matchedCount: 0, exact: false };
 
-  // Comparación exacta de tokens (palabra completa), no substring
+  // Comparación exacta de palabras completas (no substring)
   const tTokSet = new Set(tTok);
-  const sTokSet = new Set(sTok);
+  const matchedCount = sTok.filter(t => tTokSet.has(t)).length;
 
-  const matchedSinT = sTok.filter(t => tTokSet.has(t)).length;
-  const matchedTinS = tTok.filter(t => sTokSet.has(t)).length;
+  // Puntaje = proporción del nombre más corto (en tokens significativos) que
+  // coincide. Evita que una entrada sancionada de 1 sola palabra infle el match.
+  const score = matchedCount / Math.min(sTok.length, tTok.length);
+  const exact = sNorm === tNorm;
 
-  const score        = Math.max(matchedSinT / sTok.length, matchedTinS / tTok.length);
-  const matchedCount = Math.max(matchedSinT, matchedTinS);
-
-  return { score, matchedCount };
+  return { score, matchedCount, exact, sigSearch: sTok.length, sigTarget: tTok.length };
 }
 
 // ─── Descarga lista ONU ──────────────────────────────────────────────────────
@@ -674,9 +690,7 @@ async function fetchEUList(forceRefresh = false) {
 }
 
 // ─── Búsqueda ─────────────────────────────────────────────────────────────────
-const UMBRAL_SCORE    = 0.85; // similitud mínima por token (>85%)
-const UMBRAL_PALABRAS = 3;    // mínimo de palabras completas coincidentes
-const MAX_RESULTADOS  = 15;
+const MAX_RESULTADOS = 15;
 
 function buscarEnLista(entries, { nombre, cedula }) {
   const hits = [];
@@ -689,11 +703,22 @@ function buscarEnLista(entries, { nombre, cedula }) {
     // Búsqueda por nombre
     if (nombre && normalize(nombre).length >= 3) {
       for (const n of entry.nombres) {
-        const { score, matchedCount } = tokenScore(nombre, n);
-        if (score >= UMBRAL_SCORE || matchedCount >= UMBRAL_PALABRAS) {
+        const { matchedCount, exact, sigSearch } = tokenScore(nombre, n);
+        // Cobertura = proporción de palabras distintivas del nombre buscado que
+        // aparecen en la entrada. Para marcar coincidencia se exige:
+        //   - coincidencia exacta del nombre completo, O
+        //   - al menos 2 palabras distintivas coincidentes Y que cubran ≥66%
+        //     del nombre buscado.
+        // Esto evita falsos positivos por una sola palabra compartida (ej. una
+        // razón social "Kamel Group, S.A." contra cualquier persona llamada
+        // "Kamel", o un nombre común como "María").
+        const cobertura = sigSearch ? matchedCount / sigSearch : 0;
+        if (exact || (matchedCount >= 2 && cobertura >= 0.66)) {
           coincide   = true;
-          puntaje    = score;
-          razonMatch = `Nombre: "${n}" (${Math.round(score * 100)}% similitud, ${matchedCount} palabras coinciden)`;
+          puntaje    = exact ? 1 : cobertura;
+          razonMatch = exact
+            ? `Nombre EXACTO: "${n}"`
+            : `Nombre: "${n}" (${matchedCount} palabras distintivas coinciden, ${Math.round(cobertura * 100)}% del nombre buscado)`;
           break;
         }
       }
@@ -1543,7 +1568,7 @@ app.delete('/api/clientes/:id/documentos/:docId', (req, res) => {
 });
 
 // ─── API: Reporte PDF ─────────────────────────────────────────────────────────
-app.get('/api/reporte/:id', (req, res) => {
+app.get('/api/reporte/:id', async (req, res) => {
   const row = dbGet(
     `SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula, cl.tipo AS cliente_tipo
      FROM consultas c LEFT JOIN clientes cl ON cl.id = c.cliente_id
@@ -1558,6 +1583,21 @@ app.get('/api/reporte/:id', (req, res) => {
   let beneficiarios = [];
   if (row.cliente_id && row.cliente_tipo === 'juridica') {
     beneficiarios = dbAll('SELECT * FROM beneficiarios_finales WHERE cliente_id = ? ORDER BY id', [row.cliente_id]);
+    // Re-tamizar cada beneficiario final en vivo, para que el reporte de la
+    // empresa siempre refleje el estado actual de TODOS sus beneficiarios
+    // (Art. 26-A y 28). Se persiste el resultado para mantener la ficha al día.
+    const { fecha, hora } = ahoraPA();
+    for (const bf of beneficiarios) {
+      try {
+        const tam = await tamizarPersona(bf.nombre, bf.cedula);
+        bf.coincidencia     = tam.hayCoincidencia ? 1 : 0;
+        bf.resultado_listas = tam.resumen;
+        dbExec(
+          'UPDATE beneficiarios_finales SET coincidencia = ?, resultado_listas = ?, fecha_revision = ? WHERE id = ?',
+          [bf.coincidencia, bf.resultado_listas, `${fecha} ${hora}`, bf.id]
+        );
+      } catch (_) { /* si falla el tamizaje, se conserva el resultado guardado */ }
+    }
   }
 
   res.setHeader('Content-Type', 'application/pdf');
