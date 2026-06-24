@@ -167,11 +167,14 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   background: transparent;
   border: none;
   color: #A9BBDA;
   cursor: pointer;
-  padding: 9px 16px;
+  padding: 9px 14px;
   font-size: 0.86rem;
   font-weight: 500;
   font-family: var(--fuente);
@@ -180,6 +183,19 @@ body {
   transition: color var(--t), background var(--t);
   white-space: nowrap;
 }
+.tab-icono {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: opacity var(--t), transform var(--t);
+}
+.tab:hover .tab-icono  { opacity: 1; }
+.tab.activo .tab-icono { opacity: 1; color: #60A5FA; }
+
+/* Íconos dentro de botones */
+.btn-icon { display: inline-flex; align-items: center; }
+.btn-icono { width: 17px; height: 17px; flex-shrink: 0; }
 .tab:hover  { color: #fff; background: rgba(255,255,255,0.07); }
 .tab.activo { color: #fff; background: rgba(37,99,235,0.22); font-weight: 600; }
 .tab.activo::after {

@@ -29,18 +29,18 @@
 
   <!-- ── Navegación por pestañas ── -->
   <nav class="tabs">
-    <button class="tab activo" data-tab="consulta">🔍 Nueva Consulta</button>
-    <button class="tab" data-tab="clientes" data-expediente="cliente">👤 Clientes</button>
-    <button class="tab" data-tab="clientes" data-expediente="proveedor">🏢 Proveedores</button>
-    <button class="tab" data-tab="colaboradores">👷 Colaboradores</button>
-    <button class="tab" data-tab="historial">📋 Historial</button>
-    <button class="tab" data-tab="alertas">⚠ Alertas</button>
-    <button class="tab" data-tab="inusuales">🔎 Inusuales</button>
-    <button class="tab" data-tab="ros">📋 ROS</button>
-    <button class="tab" data-tab="congelamiento">🧊 Congelamiento</button>
-    <button class="tab" data-tab="capacitacion">🎓 Capacitación</button>
-    <button class="tab" data-tab="riesgo-inst">📊 Riesgo Institucional</button>
-    <button class="tab" data-tab="estado">🛡 Listas y Cumplimiento</button>
+    <button class="tab activo" data-tab="consulta" data-icon="search"><span class="tab-txt">Nueva Consulta</span></button>
+    <button class="tab" data-tab="clientes" data-expediente="cliente" data-icon="users"><span class="tab-txt">Clientes</span></button>
+    <button class="tab" data-tab="clientes" data-expediente="proveedor" data-icon="building"><span class="tab-txt">Proveedores</span></button>
+    <button class="tab" data-tab="colaboradores" data-icon="hard-hat"><span class="tab-txt">Colaboradores</span></button>
+    <button class="tab" data-tab="historial" data-icon="history"><span class="tab-txt">Historial</span></button>
+    <button class="tab" data-tab="alertas" data-icon="alert"><span class="tab-txt">Alertas</span></button>
+    <button class="tab" data-tab="inusuales" data-icon="scan"><span class="tab-txt">Inusuales</span></button>
+    <button class="tab" data-tab="ros" data-icon="flag"><span class="tab-txt">ROS</span></button>
+    <button class="tab" data-tab="congelamiento" data-icon="snowflake"><span class="tab-txt">Congelamiento</span></button>
+    <button class="tab" data-tab="capacitacion" data-icon="cap"><span class="tab-txt">Capacitación</span></button>
+    <button class="tab" data-tab="riesgo-inst" data-icon="chart"><span class="tab-txt">Riesgo Institucional</span></button>
+    <button class="tab" data-tab="estado" data-icon="shield"><span class="tab-txt">Listas y Cumplimiento</span></button>
   </nav>
 
   <main class="contenido">
@@ -119,13 +119,13 @@
 
           <div class="acciones-formulario">
             <button type="submit" id="btn-buscar" class="btn-primario">
-              <span class="btn-icon">🔍</span>
+              <span class="btn-icon" data-icon="search"></span>
               <span class="btn-texto">Consultar Listas de Sanciones</span>
             </button>
 
             <input type="file" id="file-documento" accept="image/*,.pdf" style="display:none" />
             <button type="button" id="btn-subir-documento" class="btn-documento">
-              <span class="btn-icon">📷</span>
+              <span class="btn-icon" data-icon="camera"></span>
               <span class="btn-texto">Subir documento de identidad</span>
             </button>
           </div>
@@ -357,7 +357,7 @@
         <div class="tarjeta ficha-cliente-tarjeta">
           <div class="historial-header">
             <h2 id="ficha-nombre">— <span id="ficha-expediente-badge" class="badge-expediente oculto"></span></h2>
-            <button id="btn-buscar-aml-cliente" class="btn-primario btn-chico">🔍 Buscar AML de este cliente</button>
+            <button id="btn-buscar-aml-cliente" class="btn-primario btn-chico"><span class="btn-icon" data-icon="search"></span>Buscar AML de este cliente</button>
           </div>
 
           <div class="meta-grid ficha-meta">
@@ -818,7 +818,7 @@
           <div class="historial-header">
             <h2>Datos y nivel de riesgo</h2>
             <div style="display:flex;gap:8px">
-              <button id="btn-retamizar-colab" class="btn-secundario btn-chico">🔄 Re-tamizar en listas</button>
+              <button id="btn-retamizar-colab" class="btn-secundario btn-chico"><span class="btn-icon" data-icon="refresh"></span>Re-tamizar en listas</button>
               <button id="btn-editar-colab" class="btn-secundario btn-chico">✎ Editar</button>
             </div>
           </div>
